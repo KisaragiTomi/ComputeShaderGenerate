@@ -5,6 +5,7 @@
 #include "Kismet/BlueprintAsyncActionBase.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "Components/BoxComponent.h"
+#include "ComputerShaderSceneCapture.h"
 //
 #include "ComputerShaderMeshFill.generated.h"
 //
@@ -100,30 +101,7 @@ public:
 	}
 
 };
-UCLASS()
-class OOOCOMPUTESHADER_API ACSGenerateCaptureScene : public AActor
-{
-	GENERATED_BODY()
-public:
-	ACSGenerateCaptureScene();
-	
-	UBoxComponent* Box;
-	USceneComponent* SceneComponent;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Capturer")
-	USceneCaptureComponent2D* CaptureSceneDepth;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Capturer")
-	USceneCaptureComponent2D* CaptureSceneNormal;
 
-
-	virtual void OnConstruction(const FTransform& Transform) override;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Capturer")
-	float CaptureSize = 2048;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Capturer")
-	float MaxHeight = 10000;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Capturer")
-	float Scale3DZ = 100;
-};
 UCLASS() // Change the _API to match your project
 class OOOCOMPUTESHADER_API UComputerShaderMeshFill : public UBlueprintAsyncActionBase
 {
@@ -164,7 +142,7 @@ public:
 };
 
 UCLASS()
-class OOOCOMPUTESHADER_API UComputerShaderFunction : public UBlueprintFunctionLibrary
+class OOOCOMPUTESHADER_API UComputerShaderMeshFillFunctions : public UBlueprintFunctionLibrary
 {
 	GENERATED_BODY()
 	UFUNCTION(BlueprintCallable, Category = "ComputeShader")
@@ -188,18 +166,6 @@ class OOOCOMPUTESHADER_API UComputerShaderFunction : public UBlueprintFunctionLi
 
 	UFUNCTION(BlueprintCallable, Category = "ComputeShader")
 	static void DrawHeightMap(UTextureRenderTarget2D* InHeight, UTexture2D* InTMeshDepth, float Size, float Rotator);
-
-	UFUNCTION(BlueprintCallable, Category = "ComputeShader")
-	static void DrawLinearColorsToRenderTarget(UTextureRenderTarget2D* InTextureTarget, TArray<FLinearColor> Colors);
-	
-	UFUNCTION(BlueprintCallable, Category = "ComputeShader")
-	static void ConnectivityPixel(UTextureRenderTarget2D* InTextureTarget, UTextureRenderTarget2D* OutConnectivityMap);
-
-	UFUNCTION(BlueprintCallable, Category = "ComputeShader")
-	static void BlurTexture(UTextureRenderTarget2D* InTextureTarget, UTextureRenderTarget2D* OutBlurTexture, float BlurScale = .5);
-
-	UFUNCTION(BlueprintCallable, Category = "ComputeShader")
-	static void UpPixelsMask(UTextureRenderTarget2D* InTextureTarget, UTextureRenderTarget2D* OutUpTexture, float Threshould = .8);
 
 };
 

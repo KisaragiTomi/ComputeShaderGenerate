@@ -156,6 +156,14 @@ public:
 		OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_Y"), NUM_THREADS_PER_GROUP_DIMENSION_Y);
 		OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_Z"), NUM_THREADS_PER_GROUP_DIMENSION_Z);
 		
+		if (Parameters.PermutationId == 0)
+		{
+			OutEnvironment.SetDefine(TEXT("ENTRY_FUNCTION"), TEXT("BT_Vector4"));
+		}
+		if (Parameters.PermutationId == 1)
+		{
+			OutEnvironment.SetDefine(TEXT("ENTRY_FUNCTION"), TEXT("BT_Normal"));
+		}
 	}
 };
 

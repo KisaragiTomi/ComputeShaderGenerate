@@ -108,7 +108,34 @@ float4 BlurPixel(SamplerState Sampler, Texture2D BlurTexture, float2 uv)
     
     return SumSampleValue; 
 }
-
+float4 BlurNormalPixel(SamplerState Sampler, Texture2D BlurTexture, float2 uv)
+{
+    float Gx = 0;
+    float Gy = 0;
+    float4 SumSampleValue = float4(0, 0, 0, 0);
+    float MaxCell = 0;
+    BlurTexture.GetDimensions(MaxCell, MaxCell);
+    
+    for (int i = -1; i <= 1; i++)
+    {
+        for (int j = -1; j <= 1; j++)
+        {
+            float2 offset = float2(i, j) / MaxCell; 
+            float4 SampleValue = BlurTexture.SampleLevel(Sampler, uv + offset, 0);
+            SumSampleValue += SampleValue;
+        }
+    }
+    SumSampleValue /= 9.0; 
+    if (length(SumSampleValue) > 0.001)
+    {
+        SumSampleValue.xyz = normalize(SumSampleValue.xyz);
+    }
+    else
+    {
+        SumSampleValue.xyz = 0;
+    }
+    return SumSampleValue; 
+}
 
 
 float2 CalculateGrayGradientT(Texture2D Texture2D, uint3 DispatchThreadId)

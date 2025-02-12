@@ -34,7 +34,11 @@ void BlurTexture(
 	T_BlurTexture.GetDimensions(MaxCell, MaxCell);
 	float2 uv = DispatchThreadId.xy / (MaxCell - 1);
 	float4 BlurColor = float4(0, 0, 0, 0);
+#if ENTRY_FUNCTION == BT_Texture
 	BlurColor = BlurPixel(Sampler, T_BlurTexture, uv);
+#elif ENTRY_FUNCTION == BT_Normal
+	BlurColor = BlurNormalPixel(Sampler, T_BlurTexture, uv);
+#endif
 	BlurColor = lerp(T_BlurTexture[DispatchThreadId.xy], BlurColor, BlurScale);
 	RW_BlurTexture[DispatchThreadId.xy] = BlurColor;
 }
@@ -49,8 +53,8 @@ void UpPixel(
 					   uint GroupIndex : SV_GroupIndex)
 {
 	float3 NormalColor = T_UpPixel[DispatchThreadId.xy].xyz;
-	float dot = dot(NormalColor, float3(0, 0, 1));
+	float dotvalue = dot(NormalColor, float3(0, 0, 1));
 	
-	RW_BlurTexture[DispatchThreadId.xy] = float4(float(dot > UpPixelThreshold), 0, 0, 0);
+	RW_UpPixel[DispatchThreadId.xy] = float4(float(dotvalue > UpPixelThreshold), 0, 0, 0);
   
 }
