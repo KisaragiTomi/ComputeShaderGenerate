@@ -1,0 +1,263 @@
+#include "/Engine/Public/Platform.ush"
+#include "General.usf"
+
+float RandomRotator;
+float Size;
+
+Texture2D T_SceneDepth;
+Texture2D T_TMeshDepth;
+Texture2D T_SceneNormal;
+Texture2D T_CurrentSceneDepth;
+Texture2D T_Height;
+Texture2D T_Result;
+RWTexture2D<float4> RW_CurrentSceneDepth;
+RWTexture2D<float4> RW_DebugView;
+RWTexture2D<float4> RW_Result;
+RWTexture2D<float4> RW_Gradient;
+
+SamplerState Sampler;
+
+
+
+[numthreads(THREADGROUPSIZE_X, THREADGROUPSIZE_Y, THREADGROUPSIZE_Z)]
+void MainComputeShader(
+                       uint3 DispatchThreadId : SV_DispatchThreadID,
+	                   uint GroupIndex : SV_GroupIndex) 
+{
+    float MaxHeight = 10000;
+    float MaxCell;
+    
+    T_SceneDepth.GetDimensions(MaxCell, MaxCell);
+    float2 UV = DispatchThreadId.xy / MaxCell;
+    float4 RootSceneColor = T_SceneDepth[DispatchThreadId.xy];
+    RootSceneColor.x = MaxHeight - RootSceneColor.x;
+ 
+    bool OutSpawn = true;
+    float MaxIndex = 10;
+    float MeshStep = Size / MaxIndex;
+    float SceneHight = 0;
+    
+    
+    for(float X = 0; X < MaxIndex; X++)
+    {
+        if(OutSpawn == false)
+        {
+            break;
+        }
+        for(float Y = 0; Y < MaxIndex; Y++)
+        {
+            
+            float2 MeshUV = float2(X / MaxIndex, Y / MaxIndex);
+		    MeshUV -= .5;
+		    MeshUV = RotUV(UV, PI2);
+		    MeshUV += .5;
+            float4 MeshHeight = T_TMeshDepth.SampleLevel(Sampler, MeshUV, 0);
+            MeshHeight.x = MaxHeight - MeshHeight.x;
+            float2 TestUV = float2(UV.x + (X - MaxIndex/2) * MeshStep, UV.y + (Y - MaxIndex/2) * MeshStep);
+		    TestUV -= UV;
+            TestUV = RotUV(TestUV, RandomRotator * PI2);
+		    TestUV += UV;
+            if(TestUV.x > 1 || TestUV.y > 1 || TestUV.x < 0 || TestUV.y < 0)
+            {
+                //Grid2D.SetVector4Value<Attribute="Rotation">(IndexX, IndexY, float4(0, 0, 0, 0));
+                OutSpawn = false;
+                break;
+            }
+            
+            //float4 SceneColor = float4(0, 0, 0, 0);
+            float4 SceneColor = T_SceneDepth.SampleLevel(Sampler, TestUV, 0);
+            SceneHight = MaxHeight - SceneColor.x;
+            if(RootSceneColor.x + MeshHeight.x < SceneHight || RootSceneColor.x > SceneHight || SceneColor.y > 0)
+            {
+                //Grid2D.SetVector4Value<Attribute="Rotation">(IndexX, IndexY, float4(0, 0, 0, 0));
+                OutSpawn = false;
+                break;
+            }
+            
+            //RW_DebugView[uint2(round(TestUV.x), round(TestUV.y))] = MeshHeight;
+            float4 SceneNormalColor = T_SceneNormal.SampleLevel(Sampler, TestUV, 0);
+
+            //The value of normal can be negative, so even though the image is black, the value of length(normal) may still be greater than 0.
+            SceneNormalColor = max(float4(0, 0, 0, 0), SceneNormalColor);
+            if(SceneNormalColor.x + SceneNormalColor.y + SceneNormalColor. z > 0.01)
+            {
+                //Grid2D.SetVector4Value<Attribute="Rotation">(IndexX, IndexY, float4(0, 0, 0, 0));
+                OutSpawn = false;
+                break;
+            }
+            //RW_DebugView[DispatchThreadId.xy] = float4(1,1,1,1) * 0.15;
+        }
+    }
+    //OutSpawn = false;
+    if(OutSpawn)
+    {
+        // Grid2D.SetVector4Value<Attribute="Rotation">(IndexX, IndexY, float4(0, 0, 0, 1));
+        // Grid2DSelect.SetVector2Value<Attribute="Select">(0, 0, float2(IndexX, IndexY));
+        // Grid2DSelect.SetVector2Value<Attribute="Select">(1, 0, float2(1, 0));
+        SceneHight = MaxHeight - (T_SceneDepth.SampleLevel(Sampler, UV, 0)).x;
+        RW_Result[int2(0, 0)] = float4(UV.x, UV.y, SceneHight / MaxHeight, RandomRotator);
+        //RW_Result[int2(1, 0)] = float4(RandomRotator, 0, 0, 0);
+    }
+    //RW_Result[int2(0, 0)] = float4(1.0f, 0.0f, 0.0f, 0.0f);
+
+}
+
+[numthreads(THREADGROUPSIZE_X, THREADGROUPSIZE_Y, THREADGROUPSIZE_Z)]
+void MeshFillMult(
+                       uint3 DispatchThreadId : SV_DispatchThreadID,
+	                   uint GroupIndex : SV_GroupIndex) 
+{
+    float MaxHeight = 10000;
+    uint2 MaxResult = 0;
+    T_Result.GetDimensions(MaxResult.x, MaxResult.y);
+    float4 ResultIndex = T_Result[uint2(MaxResult.x - 1, MaxResult.y - 1)];
+    
+    //I need sample currentSceneDepth, so cant ues UAV
+    float MaxCell;
+    T_CurrentSceneDepth.GetDimensions(MaxCell, MaxCell);
+    MaxCell -= 1;
+    float2 UV = DispatchThreadId.xy / (MaxCell - 1);
+    float4 RootSceneColor = T_CurrentSceneDepth[DispatchThreadId.xy];
+    
+    RootSceneColor.x = MaxHeight - RootSceneColor.x;
+    //Grid2D.SetVector4Value<Attribute="Rotation">(IndexX, IndexY, float4(0, 0, 0, 0));
+    
+    bool OutSpawn = true;
+    float MaxIndex = 10;
+    float MeshStep = Size / MaxIndex;
+    float SceneHight = 0;
+    for(float X = 0; X < MaxIndex; X++)
+    {
+        if(OutSpawn == false)
+        {
+            break;
+        }
+        for(float Y = 0; Y < MaxIndex; Y++)
+        {
+            
+            float2 MeshUV = float2(X / MaxIndex, Y / MaxIndex);
+		    MeshUV -= .5;
+		    MeshUV = RotUV(MeshUV, PI2);
+		    MeshUV += .5;
+            float4 MeshHeight = T_TMeshDepth.SampleLevel(Sampler, MeshUV, 0);
+            MeshHeight.x = MaxHeight - MeshHeight.x;
+            float2 TestUV = float2(UV.x + (X - MaxIndex/2) * MeshStep, UV.y + (Y - MaxIndex/2) * MeshStep);
+		    TestUV -= UV;
+            TestUV = RotUV(TestUV, RandomRotator * PI2);
+		    TestUV += UV;
+            if(TestUV.x > 1 || TestUV.y > 1 || TestUV.x < 0 || TestUV.y < 0)
+            {
+                //Grid2D.SetVector4Value<Attribute="Rotation">(IndexX, IndexY, float4(0, 0, 0, 0));
+                OutSpawn = false;
+                break;
+            }
+            
+            //float4 SceneColor = float4(0, 0, 0, 0);
+            float4 CurrentSceneColor = T_CurrentSceneDepth.SampleLevel(Sampler, TestUV, 0);
+            SceneHight = MaxHeight - CurrentSceneColor.x;
+            if(RootSceneColor.x + MeshHeight.x < SceneHight || RootSceneColor.x > SceneHight)
+            {
+                //Grid2D.SetVector4Value<Attribute="Rotation">(IndexX, IndexY, float4(0, 0, 0, 0));
+                OutSpawn = false;
+                break;
+            }
+            
+            //float4 T_CurrentSceneDepth = T_CurrentSceneDepth.SampleLevel(Sampler, TestUV, 0);
+            if(CurrentSceneColor.y > 0.001)
+            {
+                //Grid2D.SetVector4Value<Attribute="Rotation">(IndexX, IndexY, float4(0, 0, 0, 0));
+                OutSpawn = false;
+                break;
+            }
+        }
+    }
+    //OutSpawn = false;
+    if(OutSpawn)
+    {
+        SceneHight = MaxHeight - (T_CurrentSceneDepth.SampleLevel(Sampler, UV, 0)).x;
+        RW_Result[uint2(ResultIndex.x * MaxResult.x, 0)] = float4(UV.x, UV.y, SceneHight / MaxHeight, 0);
+        RW_Result[uint2(ResultIndex.x * MaxResult.x, 1)] = float4(RandomRotator, Size, 0, 0);
+        float4 CountColor = T_Result[uint2(MaxResult.x - 1, MaxResult.y - 1)];
+        CountColor.x = ResultIndex.x  + 1;
+        RW_Result[uint2(MaxResult.x - 1, MaxResult.y - 1)] = CountColor;
+        
+    }
+}
+
+[numthreads(THREADGROUPSIZE_X, THREADGROUPSIZE_Y, THREADGROUPSIZE_Z)]
+void DrawCurrentHeightMap(
+                       uint3 DispatchThreadId : SV_DispatchThreadID,
+                       uint GroupIndex : SV_GroupIndex)
+{
+    
+    float MaxHeight = 10000;
+    float MaxCell = 0.0;
+    uint2 MaxResult = 0;
+    T_Result.GetDimensions(MaxResult.x, MaxResult.y);
+    float4 ResultIndex = T_Result[uint2(MaxResult.x - 1, MaxResult.y - 1)];
+    if (abs(ResultIndex.x - ResultIndex.y) < .01)
+        return;
+    
+    float4 ResultPosData = T_Result[uint2(ResultIndex.x - 1, 0)];
+    float4 ResultRotSizeData = T_Result[uint2(ResultIndex.x - 1, 1)];
+    RW_DebugView[DispatchThreadId.xy] = ResultRotSizeData;
+    T_CurrentSceneDepth.GetDimensions(MaxCell, MaxCell);
+    float2 UV = (DispatchThreadId.xy + .5) / MaxCell;
+    
+    UV -= ResultPosData.xy;
+    UV = RotUV(UV, ResultRotSizeData.x * PI2);
+    UV = ScaleUV(UV, 1 / ResultRotSizeData.y) ;
+    UV += .5;
+    if (UV .x > 1 || UV .y > 1 || UV .x < 0 || UV .y < 0)
+        return;
+    
+    float4 MeshHeight = T_TMeshDepth.SampleLevel(Sampler, UV, 0);
+    MeshHeight.x = MaxHeight - MeshHeight.x + (ResultPosData.z * MaxHeight);
+    
+    float FixDepth = max(T_CurrentSceneDepth[DispatchThreadId.xy].x - MeshHeight.x, 0.0);
+    float Mask = max(T_CurrentSceneDepth[DispatchThreadId.xy].y, MeshHeight.x > 0.0);
+    float4 CurrentSceneDepthColor = float4(FixDepth, Mask, 0, 0);
+    RW_CurrentSceneDepth[DispatchThreadId.xy] = CurrentSceneDepthColor;
+    
+    float4 ResultColor = float4(ResultIndex.x, ResultIndex.x, 0, 0);
+    RW_Result[uint2(MaxResult.x - 1, MaxResult.y - 1)] = ResultColor;
+}
+
+// [numthreads(THREADGROUPSIZE_X, THREADGROUPSIZE_Y, THREADGROUPSIZE_Z)]
+// void DrawCurrentHeightMapSingle(
+//                        uint3 DispatchThreadId : SV_DispatchThreadID,
+//                        uint GroupIndex : SV_GroupIndex)
+// {
+//     float MaxHeight = 10000;
+//     uint2 MaxResult = 0;
+//     RW_Result.GetDimensions(MaxResult.x, MaxResult.y);
+//     float4 ResultIndex = RW_Result[uint2(MaxResult.x - 1, MaxResult.y - 1)];
+//     float4 ResultData = RW_Result[uint2(round(ResultIndex.x * MaxResult.x), round(MaxResult.y - 1))];
+//     float MaxCell = 0.0;
+//     T_CurrentSceneDepth.GetDimensions(MaxCell, MaxCell);
+//     float2 UV = (DispatchThreadId.xy + .5) / MaxCell;
+//     UV -= .5;
+//     UV *= Size;
+//     UV = float2(dot(UV, float2(cos(RandomRotator), sin(RandomRotator) * -1)), dot(UV, float2(sin(RandomRotator), cos(RandomRotator))));
+//     UV += .5 ;
+//     float4 MeshHeight = T_TMeshDepth.SampleLevel(Sampler, UV, 0);
+//     MeshHeight.x = MaxHeight - MeshHeight.x;
+//     float FixDepth = max(RW_CurrentSceneDepth[DispatchThreadId.xy].x - MeshHeight.x, 0.0);
+//     float Mask = max(RW_CurrentSceneDepth[DispatchThreadId.xy].y, MeshHeight.x > 0.0);
+//     RW_CurrentSceneDepth[DispatchThreadId.xy].x = FixDepth;
+//     RW_CurrentSceneDepth[DispatchThreadId.xy].y = Mask;
+// }
+
+[numthreads(THREADGROUPSIZE_X, THREADGROUPSIZE_Y, THREADGROUPSIZE_Z)]
+void CalculateGradient(
+                       uint3 DispatchThreadId : SV_DispatchThreadID,
+                       uint GroupIndex : SV_GroupIndex)
+{
+    float MaxCell = 0;
+    T_Height.GetDimensions(MaxCell, MaxCell);
+    float2 uv = DispatchThreadId.xy / (MaxCell - 1);
+    float4 Gradient = float4(0, 0, 0, 0);
+    Gradient = ComputeGradientT(Sampler, T_Height, uv);
+    RW_Gradient[DispatchThreadId.xy] = Gradient;
+}
+

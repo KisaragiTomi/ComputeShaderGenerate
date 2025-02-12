@@ -1,0 +1,203 @@
+#include "/Engine/Public/Platform.ush"
+
+#define PI 3.14159265358979323846264f
+#define PI2 6.2831853071795864769252866f
+
+
+float2 ScaleUV(float2 UV, float2 Scale)
+{
+    float2x2 ScaleMat = float2x2(
+        Scale.x, 0,
+        0, Scale.y
+    );
+    return mul(UV, ScaleMat);
+}
+
+float2 RotUV(float2 UV, float Angle)
+{
+    float SinRot = sin(Angle);
+    float CosRot = cos(Angle);
+    float2x2 RotMat = float2x2(
+        CosRot, -SinRot,
+        SinRot, CosRot
+    );
+    return mul(UV, RotMat);
+}
+
+
+float ColorToGray(float4 color)
+{
+    float graycolor = color.x + color.y + color.z;
+    graycolor /= 3;
+    
+    return graycolor;
+}
+
+float ColorToGray(float3 color)
+{
+    float graycolor = color.x + color.y + color.z;
+    graycolor /= 3;
+    
+    return graycolor;
+}
+
+// Sobel 算子核
+static const float SobelX[3][3] = {
+    { -1,  0,  1 },
+    { -2,  0,  2 },
+    { -1,  0,  1 }
+};
+
+static const float SobelY[3][3] = {
+    { -1, -2, -1 },
+    {  0,  0,  0 },
+    {  1,  2,  1 }
+};
+
+float4 ComputeGradientT(SamplerState Sampler, Texture2D GrayTexture, float2 uv)
+{
+    float Gx = 0;
+    float Gy = 0;
+
+    float MaxCell = 0;
+    GrayTexture.GetDimensions(MaxCell, MaxCell);
+    
+    for (int i = -1; i <= 1; i++)
+    {
+        for (int j = -1; j <= 1; j++)
+        {
+            float2 offset = float2(i, j) / MaxCell; 
+            float sampleValue = GrayTexture.SampleLevel(Sampler, uv + offset, 0).r; // 采样灰度值
+            
+            Gx += sampleValue * SobelX[i + 1][j + 1];
+            Gy += sampleValue * SobelY[i + 1][j + 1];
+        }
+    }
+    
+    float2 Gradient = float2(-Gy, Gx);
+    float GradientLength = length(Gradient);
+    if (GradientLength > 0.01)
+    {
+        Gradient = normalize(Gradient);
+    }
+    else
+    {
+        Gradient = float2(0, 0);
+    }
+    return float4(Gradient, GradientLength, 0); // 梯度向量
+}
+
+float4 BlurPixel(SamplerState Sampler, Texture2D BlurTexture, float2 uv)
+{
+    float Gx = 0;
+    float Gy = 0;
+    float4 SumSampleValue = float4(0, 0, 0, 0);
+    float MaxCell = 0;
+    BlurTexture.GetDimensions(MaxCell, MaxCell);
+    
+    for (int i = -1; i <= 1; i++)
+    {
+        for (int j = -1; j <= 1; j++)
+        {
+            float2 offset = float2(i, j) / MaxCell; 
+            float4 SampleValue = BlurTexture.SampleLevel(Sampler, uv + offset, 0);
+            SumSampleValue += SampleValue;
+        }
+    }
+    SumSampleValue /= 9.0; 
+    
+    return SumSampleValue; 
+}
+
+
+
+float2 CalculateGrayGradientT(Texture2D Texture2D, uint3 DispatchThreadId)
+{
+    uint width, height;
+    Texture2D.GetDimensions(width, height);
+    float2 gradient = float2(0.0f, 0.0f);
+
+    float4 color = Texture2D[clamp(DispatchThreadId.xy, uint2(0, 0), uint2(width, height))];
+    
+    float4 upcolor = Texture2D[clamp(DispatchThreadId.xy + uint2(0,1), uint2(0, 0), uint2(width, height))];
+    gradient += float2(0,1) * (ColorToGray(upcolor) - ColorToGray(color));
+    float4 downcolor = Texture2D[clamp(DispatchThreadId.xy + uint2(0,-1), uint2(0, 0), uint2(width, height))];
+    gradient += float2(0,-1) * (ColorToGray(downcolor) - ColorToGray(color));
+    float4 leftcolor = Texture2D[clamp(DispatchThreadId.xy + uint2(-1,0), uint2(0, 0), uint2(width, height))];
+    gradient += float2(-1,0) * (ColorToGray(leftcolor) - ColorToGray(color));
+    float4 rightcolor = Texture2D[clamp(DispatchThreadId.xy + uint2(0,1), uint2(0, 0), uint2(width, height))];
+    gradient += float2(1,0) * (ColorToGray(rightcolor) - ColorToGray(color));
+
+    // float3 tempgradient = float3(0.0f, 0.0f, 0.0f);
+    // tempgradient.xy = gradient;
+    // tempgradient = normalize(tempgradient);
+    // gradient = tempgradient.xy;
+    //gradient = normalize(gradient);
+    return gradient;
+}
+
+float2 CalculateGrayGradientRWT(RWTexture2D<float> RWTexture2D, uint3 DispatchThreadId)
+{
+    uint width, height;
+    RWTexture2D.GetDimensions(width, height);
+    float2 gradient = float2(0.0f, 0.0f);
+
+    float color = RWTexture2D[clamp(DispatchThreadId.xy, uint2(0, 0), uint2(width, height))];
+    
+    float upcolor = RWTexture2D[clamp(DispatchThreadId.xy + (0,1), uint2(0, 0), uint2(width, height))];
+    gradient += float2(0,1) * ((upcolor) - (color));
+    float downcolor = RWTexture2D[clamp(DispatchThreadId.xy + (0,-1), uint2(0, 0), uint2(width, height))];
+    gradient += float2(0,-1) * ((downcolor) - (color));
+    float leftcolor = RWTexture2D[clamp(DispatchThreadId.xy + (-1,0), uint2(0, 0), uint2(width, height))];
+    gradient += float2(-1,0) * ((leftcolor) - (color));
+    float rightcolor = RWTexture2D[clamp(DispatchThreadId.xy + (0,1), uint2(0, 0), uint2(width, height))];
+    gradient += float2(1,0) * ((rightcolor) - (color));
+
+    gradient = normalize(gradient);
+    
+    return gradient;
+}
+
+float2 CalculateGrayGradientRWT(RWTexture2D<float4> RWTexture2D, uint3 DispatchThreadId)
+{
+    uint width, height;
+    RWTexture2D.GetDimensions(width, height);
+    float2 gradient = float2(0.0f, 0.0f);
+
+    float4 color = RWTexture2D[clamp(DispatchThreadId.xy, uint2(0, 0), uint2(width, height))];
+    
+    float4 upcolor = RWTexture2D[clamp(DispatchThreadId.xy + (0,1), uint2(0, 0), uint2(width, height))];
+    gradient += float2(0,1) * (ColorToGray(upcolor) - ColorToGray(color));
+    float4 downcolor = RWTexture2D[clamp(DispatchThreadId.xy + (0,-1), uint2(0, 0), uint2(width, height))];
+    gradient += float2(0,-1) * (ColorToGray(downcolor) - ColorToGray(color));
+    float4 leftcolor = RWTexture2D[clamp(DispatchThreadId.xy + (-1,0), uint2(0, 0), uint2(width, height))];
+    gradient += float2(-1,0) * (ColorToGray(leftcolor) - ColorToGray(color));
+    float4 rightcolor = RWTexture2D[clamp(DispatchThreadId.xy + (0,1), uint2(0, 0), uint2(width, height))];
+    gradient += float2(1,0) * (ColorToGray(rightcolor) - ColorToGray(color));
+
+    gradient = normalize(gradient);
+    
+    return gradient;
+}
+
+float2 CalculateGrayGradientRWT(RWTexture2D<float3> RWTexture2D, uint3 DispatchThreadId)
+{
+    uint width, height;
+    RWTexture2D.GetDimensions(width, height);
+    float2 gradient = float2(0.0f, 0.0f);
+
+    float3 color = RWTexture2D[clamp(DispatchThreadId.xy, uint2(0, 0), uint2(width, height))];
+    
+    float3 upcolor = RWTexture2D[clamp(DispatchThreadId.xy + (0,1), uint2(0, 0), uint2(width, height))];
+    gradient += float2(0,1) * (ColorToGray(upcolor) - ColorToGray(color));
+    float3 downcolor = RWTexture2D[clamp(DispatchThreadId.xy + (0,-1), uint2(0, 0), uint2(width, height))];
+    gradient += float2(0,-1) * (ColorToGray(downcolor) - ColorToGray(color));
+    float3 leftcolor = RWTexture2D[clamp(DispatchThreadId.xy + (-1,0), uint2(0, 0), uint2(width, height))];
+    gradient += float2(-1,0) * (ColorToGray(leftcolor) - ColorToGray(color));
+    float3 rightcolor = RWTexture2D[clamp(DispatchThreadId.xy + (0,1), uint2(0, 0), uint2(width, height))];
+    gradient += float2(1,0) * (ColorToGray(rightcolor) - ColorToGray(color));
+
+    gradient = normalize(gradient);
+    
+    return gradient;
+}

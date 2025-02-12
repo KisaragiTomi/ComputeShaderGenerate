@@ -1,0 +1,56 @@
+//#pragma
+
+#include "/Engine/Public/Platform.ush"
+#include "General.usf"
+
+SamplerState Sampler;
+
+Texture2D T_Height;
+RWTexture2D<float4> RW_Gradient;
+
+[numthreads(THREADGROUPSIZE_X, THREADGROUPSIZE_Y, THREADGROUPSIZE_Z)]
+void CalculateGradient(
+					   uint3 DispatchThreadId : SV_DispatchThreadID,
+					   uint GroupIndex : SV_GroupIndex)
+{
+	float MaxCell = 0;
+	T_Height.GetDimensions(MaxCell, MaxCell);
+	float2 uv = DispatchThreadId.xy / (MaxCell - 1);
+	float4 Gradient = float4(0, 0, 0, 0);
+	Gradient = ComputeGradientT(Sampler, T_Height, uv);
+	RW_Gradient[DispatchThreadId.xy] = Gradient;
+}
+
+Texture2D T_BlurTexture;
+RWTexture2D<float4> RW_BlurTexture;
+float BlurScale;
+
+[numthreads(THREADGROUPSIZE_X, THREADGROUPSIZE_Y, THREADGROUPSIZE_Z)]
+void BlurTexture(
+					   uint3 DispatchThreadId : SV_DispatchThreadID,
+					   uint GroupIndex : SV_GroupIndex)
+{
+	float MaxCell = 0;
+	T_BlurTexture.GetDimensions(MaxCell, MaxCell);
+	float2 uv = DispatchThreadId.xy / (MaxCell - 1);
+	float4 BlurColor = float4(0, 0, 0, 0);
+	BlurColor = BlurPixel(Sampler, T_BlurTexture, uv);
+	BlurColor = lerp(T_BlurTexture[DispatchThreadId.xy], BlurColor, BlurScale);
+	RW_BlurTexture[DispatchThreadId.xy] = BlurColor;
+}
+
+Texture2D T_UpPixel;
+RWTexture2D<float4> RW_UpPixel;
+float UpPixelThreshold;
+
+[numthreads(THREADGROUPSIZE_X, THREADGROUPSIZE_Y, THREADGROUPSIZE_Z)]
+void UpPixel(
+					   uint3 DispatchThreadId : SV_DispatchThreadID,
+					   uint GroupIndex : SV_GroupIndex)
+{
+	float3 NormalColor = T_UpPixel[DispatchThreadId.xy].xyz;
+	float dot = dot(NormalColor, float3(0, 0, 1));
+	
+	RW_BlurTexture[DispatchThreadId.xy] = float4(float(dot > UpPixelThreshold), 0, 0, 0);
+  
+}

@@ -1,0 +1,1075 @@
+#include "ComputerShaderMeshFill.h"
+
+#include "ClearQuad.h"
+#include "ComputerShaderGenerateHepler.h"
+#include "GlobalShader.h"
+#include "MaterialShader.h"
+#include "ShaderParameterStruct.h"
+#include "RenderGraphResources.h"
+#include "RenderGraphUtils.h"
+#include "RenderGraphBuilder.h"
+#include "RenderTargetPool.h"
+#include "ComputerShaderGenerateHepler.h"
+#include "EngineUtils.h"
+#include "Components/SceneCaptureComponent2D.h"
+#include "Engine/StaticMeshActor.h"
+#include "Kismet/KismetRenderingLibrary.h"
+#include "ComputerShaderGeneral.h"
+
+DECLARE_STATS_GROUP(TEXT("CSMeshFill"), STATGROUP_CSGenerate, STATCAT_Advanced);
+DECLARE_CYCLE_STAT(TEXT("CS Execute"), STAT_CSGenerate_Execute, STATGROUP_CSGenerate)
+DECLARE_CYCLE_STAT(TEXT("CS Capture"), STAT_CSGenerate_Capture, STATGROUP_CSGenerate)
+DECLARE_CYCLE_STAT(TEXT("CS Tatal"), STAT_CSGenerate_Tatal, STATGROUP_CSGenerate);
+
+
+#define NUM_THREADS_PER_GROUP_DIMENSION_X 32
+#define NUM_THREADS_PER_GROUP_DIMENSION_Y 32
+#define NUM_THREADS_PER_GROUP_DIMENSION_Z 1
+/// <summary>
+///// This class carries our parameter declarations and acts as the bridge between cpp and HLSL.
+/// </summary>
+///
+
+using namespace CSHepler;
+
+class FMeshFill : public FGlobalShader
+{
+public:
+	//Declare this class as a global shader
+	DECLARE_GLOBAL_SHADER(FMeshFill);
+	//Tells the engine that this shader uses a structure for its parameters
+	SHADER_USE_PARAMETER_STRUCT(FMeshFill, FGlobalShader);
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, T_SceneDepth)
+		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, T_SceneNormal)
+		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, T_TMeshDepth)
+		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, T_CurrentSceneDepth)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, RW_CurrentSceneDepth)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, RW_DebugView)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, RW_Result)
+		SHADER_PARAMETER(float, RandomRotator)
+		SHADER_PARAMETER(float, Size)
+		// SHADER_PARAMETER_UAV(RWBuffer<float4>, OutBounds)
+		// SHADER_PARAMETER_SRV(Buffer<float>, InParticleIndices)
+		SHADER_PARAMETER_SAMPLER(SamplerState, Sampler)
+	END_SHADER_PARAMETER_STRUCT()
+public:
+	//Called by the engine to determine which permutations to compile for this shader
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{
+		
+
+		return true;
+	}
+	//Modifies the compilations environment of the shader
+	static inline void ModifyCompilationEnvironment(const FGlobalShaderPermutationParameters& Parameters, FShaderCompilerEnvironment& OutEnvironment)
+	{
+		FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
+
+		//We're using it here to add some preprocessor defines. That way we don't have to change both C++ and HLSL code 
+		// when we change the value for NUM_THREADS_PER_GROUP_DIMENSION
+	
+		OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_X"), NUM_THREADS_PER_GROUP_DIMENSION_X);
+		OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_Y"), NUM_THREADS_PER_GROUP_DIMENSION_Y);
+		OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_Z"), NUM_THREADS_PER_GROUP_DIMENSION_Z);
+	}
+};
+
+IMPLEMENT_GLOBAL_SHADER(FMeshFill, "/OoOShaders/MeshFill.usf", "MainComputeShader", SF_Compute);
+
+class FMeshFillMult : public FGlobalShader
+{
+public:
+	//Declare this class as a global shader
+	DECLARE_GLOBAL_SHADER(FMeshFillMult);
+	//Tells the engine that this shader uses a structure for its parameters
+	SHADER_USE_PARAMETER_STRUCT(FMeshFillMult, FGlobalShader);
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, T_SceneDepth)
+		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, T_SceneNormal)
+		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, T_TMeshDepth)
+		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, T_Result)
+		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, T_CurrentSceneDepth)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, RW_CurrentSceneDepth)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, RW_DebugView)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, RW_Result)
+		SHADER_PARAMETER(float, RandomRotator)
+		SHADER_PARAMETER(float, Size)
+		// SHADER_PARAMETER_UAV(RWBuffer<float4>, OutBounds)
+		// SHADER_PARAMETER_SRV(Buffer<float>, InParticleIndices)
+		SHADER_PARAMETER_SAMPLER(SamplerState, Sampler)
+	END_SHADER_PARAMETER_STRUCT()
+public:
+	//Called by the engine to determine which permutations to compile for this shader
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{
+		
+
+		return true;
+	}
+	//Modifies the compilations environment of the shader
+	static inline void ModifyCompilationEnvironment(const FGlobalShaderPermutationParameters& Parameters, FShaderCompilerEnvironment& OutEnvironment)
+	{
+		FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
+
+		//We're using it here to add some preprocessor defines. That way we don't have to change both C++ and HLSL code 
+		// when we change the value for NUM_THREADS_PER_GROUP_DIMENSION
+	
+		OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_X"), NUM_THREADS_PER_GROUP_DIMENSION_X);
+		OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_Y"), NUM_THREADS_PER_GROUP_DIMENSION_Y);
+		OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_Z"), NUM_THREADS_PER_GROUP_DIMENSION_Z);
+	}
+};
+
+IMPLEMENT_GLOBAL_SHADER(FMeshFillMult, "/OoOShaders/MeshFill.usf", "MeshFillMult", SF_Compute);
+
+// class FCalculateGradient : public FGlobalShader
+// {
+// public:
+// 	//Declare this class as a global shader
+// 	DECLARE_GLOBAL_SHADER(FCalculateGradient);
+// 	//Tells the engine that this shader uses a structure for its parameters
+// 	SHADER_USE_PARAMETER_STRUCT(FCalculateGradient, FGlobalShader);
+// 	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+// 		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, T_Height)
+// 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, RW_Gradient)
+//
+// 		SHADER_PARAMETER_SAMPLER(SamplerState, Sampler)
+// 	END_SHADER_PARAMETER_STRUCT()
+// public:
+// 	//Called by the engine to determine which permutations to compile for this shader
+// 	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+// 	{
+// 		
+//
+// 		return true;
+// 	}
+// 	//Modifies the compilations environment of the shader
+// 	static inline void ModifyCompilationEnvironment(const FGlobalShaderPermutationParameters& Parameters, FShaderCompilerEnvironment& OutEnvironment)
+// 	{
+// 		FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
+//
+// 		//We're using it here to add some preprocessor defines. That way we don't have to change both C++ and HLSL code 
+// 		// when we change the value for NUM_THREADS_PER_GROUP_DIMENSION
+// 	
+// 		OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_X"), NUM_THREADS_PER_GROUP_DIMENSION_X);
+// 		OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_Y"), NUM_THREADS_PER_GROUP_DIMENSION_Y);
+// 		OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_Z"), NUM_THREADS_PER_GROUP_DIMENSION_Z);
+// 	}
+// };
+// IMPLEMENT_GLOBAL_SHADER(FCalculateGradient, "/OoOShaders/MeshFill.usf", "CalculateGradient", SF_Compute);
+
+class FDrawHeightMap : public FGlobalShader
+{
+public:
+	//Declare this class as a global shader
+	DECLARE_GLOBAL_SHADER(FDrawHeightMap);
+	//Tells the engine that this shader uses a structure for its parameters
+	SHADER_USE_PARAMETER_STRUCT(FDrawHeightMap, FGlobalShader);
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+	
+		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, T_Result)
+		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, T_TMeshDepth)
+		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, T_CurrentSceneDepth)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, RW_CurrentSceneDepth)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, RW_Result)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, RW_DebugView)
+		// SHADER_PARAMETER(float, RandomRotator)
+		// SHADER_PARAMETER(float, Size)
+		
+		SHADER_PARAMETER_SAMPLER(SamplerState, Sampler)
+	END_SHADER_PARAMETER_STRUCT()
+public:
+	//Called by the engine to determine which permutations to compile for this shader
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{
+		
+
+		return true;
+	}
+	//Modifies the compilations environment of the shader
+	static inline void ModifyCompilationEnvironment(const FGlobalShaderPermutationParameters& Parameters, FShaderCompilerEnvironment& OutEnvironment)
+	{
+		FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
+
+		//We're using it here to add some preprocessor defines. That way we don't have to change both C++ and HLSL code 
+		// when we change the value for NUM_THREADS_PER_GROUP_DIMENSION
+	
+		OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_X"), NUM_THREADS_PER_GROUP_DIMENSION_X);
+		OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_Y"), NUM_THREADS_PER_GROUP_DIMENSION_Y);
+		OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_Z"), NUM_THREADS_PER_GROUP_DIMENSION_Z);
+	}
+};
+
+// This will tell the engine to create the shader and where the shader entry point is.
+//												 ShaderType              ShaderPath             Shader function name    Type
+
+
+
+IMPLEMENT_GLOBAL_SHADER(FDrawHeightMap, "/OoOShaders/MeshFill.usf", "DrawCurrentHeightMap", SF_Compute);
+
+// class FCopySceneDepth : public FGlobalShader
+// {
+// public:
+// 	//Declare this class as a global shader
+// 	DECLARE_GLOBAL_SHADER(FCopySceneDepth);
+// 	//Tells the engine that this shader uses a structure for its parameters
+// 	SHADER_USE_PARAMETER_STRUCT(FCopySceneDepth, FGlobalShader);
+// 	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+// 		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, ColorRT)
+// 		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, UVRT)
+// 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D, DrawRT)
+// 	END_SHADER_PARAMETER_STRUCT()
+// public:
+// 	//Called by the engine to determine which permutations to compile for this shader
+// 	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+// 	{
+// 		
+//
+// 		return true;
+// 	}
+// 	//Modifies the compilations environment of the shader
+// 	static inline void ModifyCompilationEnvironment(const FGlobalShaderPermutationParameters& Parameters, FShaderCompilerEnvironment& OutEnvironment)
+// 	{
+// 		FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
+//
+// 		//We're using it here to add some preprocessor defines. That way we don't have to change both C++ and HLSL code 
+// 		// when we change the value for NUM_THREADS_PER_GROUP_DIMENSION
+// 	
+// 		OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_X"), NUM_THREADS_PER_GROUP_DIMENSION_X);
+// 		OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_Y"), NUM_THREADS_PER_GROUP_DIMENSION_Y);
+// 		OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_Z"), NUM_THREADS_PER_GROUP_DIMENSION_Z);
+// 	}
+// };
+
+
+
+
+void FMeshFillCSInterface::DispatchRenderThread(FRHICommandListImmediate& RHICmdList, FMeshFillCSParameters Params)
+{
+	// FRDGBuilder GraphBuilder(RHICmdList);
+	// {
+	// 	// SCOPE_CYCLE_COUNTER(STAT_OoOComputeShader_Execute);
+	// 	// DECLARE_GPU_STAT(OoOComputeShader)
+	// 	// RDG_EVENT_SCOPE(GraphBuilder, "OoOComputeShader");
+	// 	// RDG_GPU_STAT_SCOPE(GraphBuilder, OoOComputeShader);
+	// 	
+	// 	
+	// 	typename FMeshFill::FPermutationDomain PermutationVector;
+	//
+	// 	TShaderMapRef<FMeshFill> ComputeShader(GetGlobalShaderMap(GMaxRHIFeatureLevel), PermutationVector);
+	//
+	// 	bool bIsShaderValid = ComputeShader.IsValid();
+	//
+	// 	if (bIsShaderValid)
+	// 	{
+	// 		FMeshFill::FParameters* PassParameters = GraphBuilder.AllocParameters<FMeshFill::FParameters>();
+	//
+	// 		const uint32 NumElements = Params.Sizes.Num();
+	// 		const uint32 BytesPerElement = sizeof(float);
+	// 		const uint32 TotalBytes = NumElements * BytesPerElement;
+	//
+	// 		// 创建结构化缓冲区
+	// 		FRHIResourceCreateInfo CreateSizeInfo(TEXT("SizeBuffer"));
+	// 		FBufferRHIRef StructuredBuffer = RHICreateStructuredBuffer(
+	// 			BytesPerElement,            // 每个元素的大小
+	// 			TotalBytes,                 // 总字节数
+	// 			BUF_Static | BUF_ShaderResource,         // 允许着色器访问
+	// 			CreateSizeInfo
+	// 		);
+	//
+	// 		// 将数据复制到缓冲区
+	// 		void* BufferData = RHICmdList.LockBuffer(StructuredBuffer, 0, TotalBytes, RLM_WriteOnly);
+	// 		FMemory::Memcpy(BufferData, Params.Sizes.GetData(), TotalBytes);
+	// 		RHICmdList.UnlockBuffer(StructuredBuffer);
+	//
+	// 		// 创建Shader Resource View (SRV)
+	// 		FShaderResourceViewRHIRef ShaderResourceView = RHICreateShaderResourceView(StructuredBuffer);
+	// 		
+	// 		const int32 BufferSize = 64;
+	// 		FRHIResourceCreateInfo CreateInfo(TEXT("BoundsVertexBuffer"));
+	// 		FBufferRHIRef BoundsVertexBufferRHI = RHICmdList.CreateVertexBuffer(
+	// 			BufferSize,
+	// 			BUF_UnorderedAccess | BUF_KeepCPUAccessible,
+	// 			CreateInfo);
+	// 		FUnorderedAccessViewRHIRef BoundsVertexBufferUAV = RHICmdList.CreateUnorderedAccessView(
+	// 			BoundsVertexBufferRHI,
+	// 			PF_A32B32G32R32F );
+	// 		PassParameters->OutBounds = BoundsVertexBufferUAV;
+	//
+	// 		//FRHIShaderResourceView* VertexBufferSRV;
+	//
+	// 		FRDGTextureDesc Desc(FRDGTextureDesc::Create2D(Params.ColorRT->GetSizeXY(), PF_FloatRGBA, FClearValueBinding::White, TexCreate_RenderTargetable | TexCreate_ShaderResource | TexCreate_UAV));
+	// 		FRDGTextureRef TmpTexture = GraphBuilder.CreateTexture(Desc, TEXT("OoOComputeShader_TempTexture"));
+	// 		FRDGTextureRef TargetTexture = RegisterExternalTexture(GraphBuilder, Params.ColorRT->GetRenderTargetTexture(), TEXT("OoOComputeShader_RT"));
+	// 		PassParameters->ColorRT = TargetTexture;
+	// 		PassParameters->DrawRT = GraphBuilder.CreateUAV(TmpTexture);
+	// 		
+	// 		//PassParameters->Seed = 1;
+	// 		
+	// 		auto GroupCount = FComputeShaderUtils::GetGroupCount(FIntVector(Params.X, Params.Y, Params.Z), FComputeShaderUtils::kGolden2DGroupSize);
+	// 		GraphBuilder.AddPass(
+	// 			RDG_EVENT_NAME("ExecuteExampleComputeShader"),
+	// 			PassParameters,
+	// 			ERDGPassFlags::AsyncCompute,
+	// 			[&PassParameters, ComputeShader, GroupCount](FRHIComputeCommandList& RHICmdList)
+	// 			{
+	// 				FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader, *PassParameters, GroupCount);
+	// 			});
+	// 		
+	// 		FRDGTextureRef RDGSourceTexture = RegisterExternalTexture(GraphBuilder, Params.DrawRT->GetRenderTargetTexture(), TEXT("DrawHOLDTexture_Gradient"));
+	// 		AddCopyTexturePass(GraphBuilder, TmpTexture, RDGSourceTexture, FRHICopyTextureInfo());
+	//
+	// 		BoundsVertexBufferUAV.SafeRelease();
+	// 		ShaderResourceView.SafeRelease();
+	// 	}
+	// }
+	// GraphBuilder.Execute();
+	
+}
+
+void UComputerShaderFunction::CSMeshFill(ACSGenerateCaptureScene* Capturer, UStaticMesh* StaticMesh, UTextureRenderTarget2D* DubugView, UTextureRenderTarget2D* Result, UTexture2D* TMeshDepth, float SpawnSize, float TestSizeScale, FName Tag)
+{
+	SCOPE_CYCLE_COUNTER(STAT_CSGenerate_Tatal);
+	float CapturerSize = Capturer->CaptureSize;
+	float MaxHeight = Capturer->MaxHeight;
+	float MeshSize = FMath::Max(StaticMesh->GetBounds().BoxExtent.X, StaticMesh->GetBounds().BoxExtent.Y) * 2;
+	float DrawSize = MeshSize / CapturerSize * SpawnSize;
+	
+	{
+		SCOPE_CYCLE_COUNTER(STAT_CSGenerate_Capture);
+		Capturer->CaptureSceneDepth->CaptureScene();
+		Capturer->CaptureSceneNormal->CaptureScene();
+		FlushRenderingCommands();
+	}
+	
+	FCSGenerateParameter Parameter;
+	Parameter.SceneDepth = Capturer->CaptureSceneDepth->TextureTarget;
+	Parameter.SceneNormal =Capturer->CaptureSceneNormal->TextureTarget;
+	Parameter.Result = Result;
+	Parameter.DebugView = DubugView;
+	Parameter.TMeshDepth = TMeshDepth;
+	Parameter.Size = DrawSize * TestSizeScale;
+	Parameter.RandomRoation = FMath::FRandRange(0.0, 1.0);
+
+	{
+		SCOPE_CYCLE_COUNTER(STAT_CSGenerate_Execute);
+		UComputerShaderFunction::CalculateMeshLoctionAndRotation(Parameter);
+		FlushRenderingCommands();
+	}
+	
+	TArray<FLinearColor> Colors;
+	UKismetRenderingLibrary::ReadRenderTargetRaw(GWorld, Result, Colors);
+	if (Colors[0].A == 0)
+		return;
+	
+	FActorSpawnParameters SpawnParameters;
+	AStaticMeshActor *SpawnMesh = GWorld->SpawnActor<AStaticMeshActor>(SpawnParameters);
+	
+	FVector SpawnLocation = FVector(Colors[0].R * CapturerSize, Colors[0].G * CapturerSize, Colors[0].B * MaxHeight) + Capturer->GetActorLocation() - FVector(1, 1, 0) * CapturerSize / 2;
+	FRotator SpawnRotation = FRotator(0, Colors[0].A * 360, 0);
+	FVector SpawnScale = FVector(1, 1, 1) * SpawnSize;
+	FTransform SpawnTransform(SpawnRotation, SpawnLocation, SpawnScale);
+	
+	SpawnMesh->SetActorTransform(SpawnTransform);
+	SpawnMesh->GetStaticMeshComponent()->SetStaticMesh(StaticMesh);
+	SpawnMesh->Tags = {Tag};
+	
+	TArray<AActor*> StaticMeshActors;
+	for (TActorIterator<AActor> It(GWorld, AStaticMeshActor::StaticClass()); It; ++It)
+	{
+		AActor* Actor = *It;
+		if (IsValid(Actor) && Actor->ActorHasTag(Tag))
+		{
+			StaticMeshActors.Add(Actor);
+		}
+	}
+	Capturer->CaptureSceneNormal->ShowOnlyActors = StaticMeshActors;
+}
+
+void UComputerShaderFunction::CSMeshFillMult(ACSGenerateCaptureScene* Capturer, UStaticMesh* StaticMesh,
+                                              UTextureRenderTarget2D* DubugView, UTextureRenderTarget2D* Result, UTextureRenderTarget2D* CurrentSceneDepth, UTexture2D* TMeshDepth, int32 Iteration,
+                                              float SpawnSize, float TestSizeScale, FName Tag)
+{
+		SCOPE_CYCLE_COUNTER(STAT_CSGenerate_Tatal);
+	float CapturerSize = Capturer->CaptureSize;
+	float MaxHeight = Capturer->MaxHeight;
+	float MeshSize = FMath::Max(StaticMesh->GetBounds().BoxExtent.X, StaticMesh->GetBounds().BoxExtent.Y) * 2;
+	float DrawSize = MeshSize / CapturerSize * SpawnSize;
+	
+	{
+		SCOPE_CYCLE_COUNTER(STAT_CSGenerate_Capture);
+		Capturer->CaptureSceneDepth->CaptureScene();
+		Capturer->CaptureSceneNormal->CaptureScene();
+		FlushRenderingCommands();
+	}
+	
+	FCSGenerateParameter Parameter;
+	Parameter.SceneDepth = Capturer->CaptureSceneDepth->TextureTarget;
+	Parameter.SceneNormal =Capturer->CaptureSceneNormal->TextureTarget;
+	Parameter.Result = Result;
+	Parameter.DebugView = DubugView;
+	Parameter.CurrentSceneDepth = CurrentSceneDepth;
+	Parameter.TMeshDepth = TMeshDepth;
+	Parameter.Size = DrawSize * TestSizeScale;
+	Parameter.RandomRoation = FMath::FRandRange(0.0, 1.0);
+
+	{
+		SCOPE_CYCLE_COUNTER(STAT_CSGenerate_Execute);
+		UComputerShaderFunction::CalculateMeshLoctionAndRotationMult(Parameter, 1);
+		FlushRenderingCommands();
+	}
+	TArray<FLinearColor> LinearSamples;
+
+
+	FRenderTarget* RT_Result = Result->GameThread_GetRenderTargetResource();
+	FIntRect SampleRect(0, 0, Result->SizeX - 1, Result->SizeY - 1);
+	FReadSurfaceDataFlags ReadSurfaceDataFlags = FReadSurfaceDataFlags(RCM_MinMax);
+	RT_Result->ReadLinearColorPixels(LinearSamples, ReadSurfaceDataFlags, SampleRect);
+	
+	// switch (EPixelFormat ReadRenderTargetHelper(Samples, LinearSamples, WorldContextObject, TextureRenderTarget, X, Y, 1, 1))
+	// {
+	// case PF_B8G8R8A8:
+	// 	check(Samples.Num() == 1 && LinearSamples.Num() == 0);
+	// 	return Samples[0];
+	// case PF_FloatRGBA:
+	// 	check(Samples.Num() == 0 && LinearSamples.Num() == 1);
+	// 	return LinearSamples[0].ToFColor(true);
+	float ResultSize = Result->SizeX;
+	TArray<FLinearColor> Colors;
+	UKismetRenderingLibrary::ReadRenderTargetRaw(GWorld, Result, Colors);
+	int32 MaxGenerate = FMath::RoundToInt(Colors[Colors.Num() - 1].R);
+	if (MaxGenerate == 0)
+		return;
+
+	for (int32 i = 0; i < MaxGenerate; i++)
+	{
+		FActorSpawnParameters SpawnParameters;
+		AStaticMeshActor *SpawnMesh = GWorld->SpawnActor<AStaticMeshActor>(SpawnParameters);
+	
+		FVector SpawnLocation = FVector(Colors[i].R * CapturerSize, Colors[i].G * CapturerSize, Colors[i].B * MaxHeight) + Capturer->GetActorLocation() - FVector(1, 1, 0) * CapturerSize / 2;
+		FRotator SpawnRotation = FRotator(0, Colors[i + Result->SizeX].R * 360, 0);
+		FVector SpawnScale = FVector(1, 1, 1) * Colors[i + Result->SizeX].G  / MeshSize * CapturerSize;
+		FTransform SpawnTransform(SpawnRotation, SpawnLocation, SpawnScale);
+	
+		SpawnMesh->SetActorTransform(SpawnTransform);
+		SpawnMesh->GetStaticMeshComponent()->SetStaticMesh(StaticMesh);
+		SpawnMesh->Tags = {Tag};
+	}
+	
+	TArray<AActor*> StaticMeshActors;
+	for (TActorIterator<AActor> It(GWorld, AStaticMeshActor::StaticClass()); It; ++It)
+	{
+		AActor* Actor = *It;
+		if (IsValid(Actor) && Actor->ActorHasTag(Tag))
+		{
+			StaticMeshActors.Add(Actor);
+		}
+	}
+	Capturer->CaptureSceneNormal->ShowOnlyActors = StaticMeshActors;
+}
+
+void UComputerShaderFunction::CalculateMeshLoctionAndRotation(FCSGenerateParameter Params)
+{
+	if (!Params.IsValid())
+		return;
+	Params.SceneNormal->ResizeTarget(512, 512);
+	Params.SceneDepth->ResizeTarget(512, 512);
+	Params.DebugView->ResizeTarget(512, 512);
+	Params.Result->ResizeTarget(2, 1);
+	UTexture2D* TMeshDepth = Params.TMeshDepth;
+	FRenderTarget* SceneNormal = Params.SceneNormal->GameThread_GetRenderTargetResource();
+	FRenderTarget* SceneDepth = Params.SceneDepth->GameThread_GetRenderTargetResource();
+	
+	FRenderTarget* DebugView = Params.DebugView->GameThread_GetRenderTargetResource();
+	FRenderTarget* Result = Params.Result->GameThread_GetRenderTargetResource();
+
+	
+	ENQUEUE_RENDER_COMMAND(SceneDrawCompletion)(
+	[SceneDepth, TMeshDepth, DebugView, Result, SceneNormal, Params](FRHICommandListImmediate& RHICmdList)
+	{
+		FRDGBuilder GraphBuilder(RHICmdList);
+		{
+			
+			DECLARE_GPU_STAT(CSMeshFill)
+			RDG_EVENT_SCOPE(GraphBuilder, "CSMeshFill");
+			RDG_GPU_STAT_SCOPE(GraphBuilder, CSMeshFill);
+			
+			
+			typename FMeshFill::FPermutationDomain PermutationVector;
+		
+			TShaderMapRef<FMeshFill> ComputeShader(GetGlobalShaderMap(GMaxRHIFeatureLevel), PermutationVector);
+		
+			bool bIsShaderValid = ComputeShader.IsValid();
+		
+			if (bIsShaderValid && SceneDepth)
+			{
+				FMeshFill::FParameters* PassParameters = GraphBuilder.AllocParameters<FMeshFill::FParameters>();
+				auto GroupCount = FComputeShaderUtils::GetGroupCount(FIntVector(SceneDepth->GetSizeXY().X, SceneDepth->GetSizeXY().Y, 1), FComputeShaderUtils::kGolden2DGroupSize);
+				
+				FRDGTextureDesc Desc_DebugView(FRDGTextureDesc::Create2D(SceneDepth->GetSizeXY(), PF_FloatRGBA, FClearValueBinding::White, TexCreate_RenderTargetable | TexCreate_ShaderResource | TexCreate_UAV));
+				FRDGTextureRef TmpTexture_DebugView = GraphBuilder.CreateTexture(Desc_DebugView, TEXT("DebugView_TempTexture"));
+				AddClearRenderTargetPass(GraphBuilder, TmpTexture_DebugView, FLinearColor::Black);
+				
+				FRDGTextureDesc Desc_CurrentSceneDepth(FRDGTextureDesc::Create2D(SceneDepth->GetSizeXY(), PF_FloatRGBA, FClearValueBinding::White, TexCreate_RenderTargetable | TexCreate_ShaderResource | TexCreate_UAV));
+				FRDGTextureRef TmpTexture_CurrentSceneDepth = GraphBuilder.CreateTexture(Desc_CurrentSceneDepth, TEXT("CurrentSceneDepth_TempTexture"));
+				AddClearRenderTargetPass(GraphBuilder, TmpTexture_CurrentSceneDepth, FLinearColor::Black);
+				
+				FRDGTextureDesc Desc_Result(FRDGTextureDesc::Create2D(Result->GetSizeXY(), PF_FloatRGBA, FClearValueBinding::White, TexCreate_RenderTargetable | TexCreate_ShaderResource | TexCreate_UAV));
+				FRDGTextureRef TmpTexture_Result = GraphBuilder.CreateTexture(Desc_Result, TEXT("Result_TempTexture"));
+				AddClearRenderTargetPass(GraphBuilder, TmpTexture_Result, FLinearColor(0, 0, 0, 0));
+				
+				//FRDGTextureRef TmpTexture_SceneNormal = ConvertToUVATexture(SceneNormal, GraphBuilder, FLinearColor::Black);
+
+				FRDGTextureRef CurrentSceneDepth =  RegisterExternalTexture(GraphBuilder, SceneDepth->GetRenderTargetTexture(), TEXT("CurrentSceneDepth_RT"));
+				FRDGTextureRef SceneDepthTexture = RegisterExternalTexture(GraphBuilder, SceneDepth->GetRenderTargetTexture(), TEXT("SceneDepth_RT"));
+				FRDGTextureRef SceneNormalTexture = RegisterExternalTexture(GraphBuilder, SceneNormal->GetRenderTargetTexture(), TEXT("SceneNormal_RT"));
+				FRDGTextureRef TMeshDepthTexture = RegisterExternalTexture(GraphBuilder, TMeshDepth->GetResource()->GetTextureRHI(), TEXT("TMeshDepth_T"));
+				
+				PassParameters->T_SceneDepth = SceneDepthTexture;
+				PassParameters->T_SceneNormal = SceneNormalTexture;
+				PassParameters->T_TMeshDepth = TMeshDepthTexture;
+				PassParameters->T_CurrentSceneDepth = CurrentSceneDepth;
+				PassParameters->RW_CurrentSceneDepth = GraphBuilder.CreateUAV(TmpTexture_CurrentSceneDepth);
+				PassParameters->RW_DebugView = GraphBuilder.CreateUAV(TmpTexture_DebugView);
+				PassParameters->RW_Result = GraphBuilder.CreateUAV(TmpTexture_Result);
+				PassParameters->Sampler	= TStaticSamplerState<SF_Bilinear>::GetRHI();
+				PassParameters->Size = Params.Size;
+				PassParameters->RandomRotator = Params.RandomRoation;
+				
+				AddCopyTexturePass(GraphBuilder, SceneDepthTexture, CurrentSceneDepth, FRHICopyTextureInfo());
+				GraphBuilder.AddPass(
+					RDG_EVENT_NAME("ExecuteExampleComputeShader"),
+					PassParameters,
+					ERDGPassFlags::AsyncCompute,
+					[&PassParameters, ComputeShader, GroupCount](FRHIComputeCommandList& RHICmdList)
+					{
+						FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader, *PassParameters, GroupCount);
+					});
+				
+				FRDGTextureRef ResultTexture = RegisterExternalTexture(GraphBuilder, Result->GetRenderTargetTexture(), TEXT("Result_RT"));
+				AddCopyTexturePass(GraphBuilder, TmpTexture_Result, ResultTexture, FRHICopyTextureInfo());
+
+				FRDGTextureRef DebugViewTexture = RegisterExternalTexture(GraphBuilder, DebugView->GetRenderTargetTexture(), TEXT("DebugView_RT"));
+				AddCopyTexturePass(GraphBuilder, TmpTexture_DebugView, DebugViewTexture, FRHICopyTextureInfo());
+				
+			}
+		}
+		GraphBuilder.Execute();
+	});
+}
+
+void UComputerShaderFunction::CalculateMeshLoctionAndRotationMult(FCSGenerateParameter Params, int32 NumIteraion)
+{
+	if (!Params.IsValidMult())
+		return;
+	
+	int32 ResultSize = GenerateTextureSize(NumIteraion);
+	if (ResultSize == -1)
+		return;
+	
+	Params.SceneNormal->ResizeTarget(512, 512);
+	Params.SceneDepth->ResizeTarget(512, 512);
+	Params.DebugView->ResizeTarget(512, 512);
+	Params.CurrentSceneDepth->ResizeTarget(512, 512);
+	Params.Result->ResizeTarget(ResultSize, 2);
+	UTexture2D* TMeshDepth = Params.TMeshDepth;
+	FRenderTarget* SceneNormal = Params.SceneNormal->GameThread_GetRenderTargetResource();
+	FRenderTarget* SceneDepth = Params.SceneDepth->GameThread_GetRenderTargetResource();
+	
+	FRenderTarget* DebugView = Params.DebugView->GameThread_GetRenderTargetResource();
+	FRenderTarget* Result = Params.Result->GameThread_GetRenderTargetResource();
+	FRenderTarget* CurrentSceneDepth = Params.CurrentSceneDepth->GameThread_GetRenderTargetResource();
+	float SizeX = SceneDepth->GetSizeXY().X;
+	float SizeY = SceneDepth->GetSizeXY().Y;
+	
+	ENQUEUE_RENDER_COMMAND(SceneDrawCompletion)(
+	[NumIteraion, SizeX, SizeY, SceneDepth, TMeshDepth, DebugView, Result, SceneNormal, CurrentSceneDepth, Params](FRHICommandListImmediate& RHICmdList)
+	{
+		FRDGBuilder GraphBuilder(RHICmdList);
+		{
+			DECLARE_GPU_STAT(CSMeshFill)
+			RDG_EVENT_SCOPE(GraphBuilder, "CSMeshFill");
+			RDG_GPU_STAT_SCOPE(GraphBuilder, CSMeshFill);
+			
+			TShaderMapRef<FMeshFillMult> ComputeShaderTestMesh(GetGlobalShaderMap(GMaxRHIFeatureLevel), typename FMeshFillMult::FPermutationDomain());
+			TShaderMapRef<FDrawHeightMap> ComputeShaderDrawMesh(GetGlobalShaderMap(GMaxRHIFeatureLevel), typename FDrawHeightMap::FPermutationDomain());
+		
+			bool bIsShaderValid = ComputeShaderTestMesh.IsValid() && ComputeShaderDrawMesh.IsValid();
+		
+			if (bIsShaderValid && SceneDepth != nullptr)
+			{
+				auto GroupCount = FComputeShaderUtils::GetGroupCount(FIntVector(SizeX, SizeY, 1), FComputeShaderUtils::kGolden2DGroupSize);
+				
+				FMeshFillMult::FParameters* PassParameters_MF = GraphBuilder.AllocParameters<FMeshFillMult::FParameters>();
+				FDrawHeightMap::FParameters* PassParameters_DH = GraphBuilder.AllocParameters<FDrawHeightMap::FParameters>();
+				
+				FRDGTextureDesc Desc_DebugView(FRDGTextureDesc::Create2D(SceneDepth->GetSizeXY(), PF_FloatRGBA, FClearValueBinding::White, TexCreate_RenderTargetable | TexCreate_ShaderResource | TexCreate_UAV));
+				FRDGTextureRef TmpTexture_DebugView = GraphBuilder.CreateTexture(Desc_DebugView, TEXT("DebugView_TempTexture"));
+				AddClearRenderTargetPass(GraphBuilder, TmpTexture_DebugView, FLinearColor::Black);
+				FRDGTextureUAVRef TmpTextureUAV_DebugView = GraphBuilder.CreateUAV(TmpTexture_DebugView);
+				
+				FRDGTextureDesc Desc_CurrentSceneDepth(FRDGTextureDesc::Create2D(SceneDepth->GetSizeXY(), PF_FloatRGBA, FClearValueBinding::White, TexCreate_RenderTargetable | TexCreate_ShaderResource | TexCreate_UAV));
+				FRDGTextureRef TmpTexture_CurrentSceneDepth = GraphBuilder.CreateTexture(Desc_CurrentSceneDepth, TEXT("CurrentSceneDepth_TempTexture"));
+				AddClearRenderTargetPass(GraphBuilder, TmpTexture_CurrentSceneDepth, FLinearColor::Black);
+				FRDGTextureUAVRef TmpTextureUAV_CurrentSceneDepth = GraphBuilder.CreateUAV(TmpTexture_CurrentSceneDepth);
+				
+				FRDGTextureDesc Desc_Result(FRDGTextureDesc::Create2D(Result->GetSizeXY(), PF_FloatRGBA, FClearValueBinding::White, TexCreate_RenderTargetable | TexCreate_ShaderResource | TexCreate_UAV));
+				FRDGTextureRef TmpTexture_Result = GraphBuilder.CreateTexture(Desc_Result, TEXT("Result_TempTexture"));
+				AddClearRenderTargetPass(GraphBuilder, TmpTexture_Result, FLinearColor(0, 0, 0, 0));
+				FRDGTextureUAVRef TmpTextureUAV_Result = GraphBuilder.CreateUAV(TmpTexture_Result);
+				
+				FRDGTextureRef CurrentSceneDepthTexture =  RegisterExternalTexture(GraphBuilder, CurrentSceneDepth->GetRenderTargetTexture(), TEXT("CurrentSceneDepth_RT"));
+				FRDGTextureRef SceneDepthTexture = RegisterExternalTexture(GraphBuilder, SceneDepth->GetRenderTargetTexture(), TEXT("SceneDepth_RT"));
+				FRDGTextureRef SceneNormalTexture = RegisterExternalTexture(GraphBuilder, SceneNormal->GetRenderTargetTexture(), TEXT("SceneNormal_RT"));
+				FRDGTextureRef ResultTexture = RegisterExternalTexture(GraphBuilder, Result->GetRenderTargetTexture(), TEXT("Result_RT"));
+				
+				FRDGTextureRef TMeshDepthTexture = RegisterExternalTexture(GraphBuilder, TMeshDepth->GetResource()->GetTextureRHI(), TEXT("TMeshDepth_T"));
+				
+				PassParameters_MF->T_Result = ResultTexture;
+				PassParameters_MF->T_SceneDepth = SceneDepthTexture;
+				PassParameters_MF->T_SceneNormal = SceneNormalTexture;
+				PassParameters_MF->T_CurrentSceneDepth = CurrentSceneDepthTexture;
+				PassParameters_MF->RW_CurrentSceneDepth = TmpTextureUAV_CurrentSceneDepth;
+				PassParameters_MF->RW_DebugView = TmpTextureUAV_DebugView;
+				PassParameters_MF->RW_Result = TmpTextureUAV_Result;
+				PassParameters_MF->Sampler	= TStaticSamplerState<SF_Bilinear>::GetRHI();
+
+				PassParameters_DH->T_Result = ResultTexture;
+				PassParameters_DH->T_CurrentSceneDepth = CurrentSceneDepthTexture;
+				PassParameters_DH->RW_Result = TmpTextureUAV_Result;
+				PassParameters_DH->RW_CurrentSceneDepth = TmpTextureUAV_CurrentSceneDepth;
+				PassParameters_DH->RW_DebugView = TmpTextureUAV_DebugView;
+				PassParameters_DH->Sampler = TStaticSamplerState<SF_Bilinear>::GetRHI();
+				
+				
+				AddCopyTexturePass(GraphBuilder, SceneDepthTexture, TmpTexture_CurrentSceneDepth, FRHICopyTextureInfo());
+				AddCopyTexturePass(GraphBuilder, SceneDepthTexture, CurrentSceneDepthTexture, FRHICopyTextureInfo());
+				AddCopyTexturePass(GraphBuilder, TmpTexture_Result, ResultTexture, FRHICopyTextureInfo());
+				for (int32 i = 0; i < NumIteraion; i++)
+				{
+					PassParameters_DH->T_TMeshDepth = TMeshDepthTexture;
+					PassParameters_MF->T_TMeshDepth = TMeshDepthTexture;
+					PassParameters_MF->Size = Params.Size;
+					PassParameters_MF->RandomRotator = Params.RandomRoation;
+								
+					GraphBuilder.AddPass(
+						RDG_EVENT_NAME("ExecuteExampleComputeShader"),
+						PassParameters_MF,
+						ERDGPassFlags::AsyncCompute,
+						[&PassParameters_MF, ComputeShaderTestMesh, GroupCount](FRHIComputeCommandList& RHICmdList)
+						{
+							FComputeShaderUtils::Dispatch(RHICmdList, ComputeShaderTestMesh, *PassParameters_MF, GroupCount);
+						});
+
+					AddCopyTexturePass(GraphBuilder, TmpTexture_Result, ResultTexture, FRHICopyTextureInfo());
+					
+					GraphBuilder.AddPass(
+						RDG_EVENT_NAME("ExecuteExampleComputeShader"),
+						PassParameters_DH,
+						ERDGPassFlags::AsyncCompute,
+						[&PassParameters_DH, ComputeShaderDrawMesh, GroupCount](FRHIComputeCommandList& RHICmdList)
+						{
+							FComputeShaderUtils::Dispatch(RHICmdList, ComputeShaderDrawMesh, *PassParameters_DH, GroupCount);
+						});
+					
+					AddCopyTexturePass(GraphBuilder, TmpTexture_CurrentSceneDepth, CurrentSceneDepthTexture, FRHICopyTextureInfo());
+					AddCopyTexturePass(GraphBuilder, TmpTexture_Result, ResultTexture, FRHICopyTextureInfo());
+				}
+				
+				FRDGTextureRef DebugViewTexture = RegisterExternalTexture(GraphBuilder, DebugView->GetRenderTargetTexture(), TEXT("DebugView_RT"));
+				AddCopyTexturePass(GraphBuilder, TmpTexture_DebugView, DebugViewTexture, FRHICopyTextureInfo());
+			}
+		}
+		GraphBuilder.Execute();
+	});
+}
+
+void UComputerShaderFunction::CopmputerGradient(UTextureRenderTarget2D* InHeight, UTexture* InMeshDepth)
+{
+	if(InHeight == nullptr || InMeshDepth == nullptr)
+		return;
+	FRenderTarget* Height = InHeight->GameThread_GetRenderTargetResource();
+	UTexture* TMeshDepth = InMeshDepth;
+	
+	ENQUEUE_RENDER_COMMAND(SceneDrawCompletion)(
+	[Height, TMeshDepth](FRHICommandListImmediate& RHICmdList)
+	{
+		FRDGBuilder GraphBuilder(RHICmdList);
+		{
+			
+			typename FCalculateGradient::FPermutationDomain PermutationVector;
+			TShaderMapRef<FCalculateGradient> ComputeShader(GetGlobalShaderMap(GMaxRHIFeatureLevel), PermutationVector);
+		
+			bool bIsShaderValid = ComputeShader.IsValid();
+		
+			if (bIsShaderValid)
+			{
+				FCalculateGradient::FParameters* PassParameters = GraphBuilder.AllocParameters<FCalculateGradient::FParameters>();
+				auto GroupCount = FComputeShaderUtils::GetGroupCount(FIntVector(Height->GetSizeXY().X, Height->GetSizeXY().Y, 1), FComputeShaderUtils::kGolden2DGroupSize);
+				
+				FRDGTextureRef TmpTexture_Gradient = ConvertToUVATexture(Height, GraphBuilder);
+				FRDGTextureRef TMeshDepthTexture = RegisterExternalTexture(GraphBuilder, TMeshDepth->GetResource()->GetTextureRHI(), TEXT("TMeshDepth_T"));
+				
+				PassParameters->T_Height = TMeshDepthTexture;
+				PassParameters->RW_Gradient = GraphBuilder.CreateUAV(TmpTexture_Gradient);
+				PassParameters->Sampler	= TStaticSamplerState<SF_Bilinear>::GetRHI();
+				
+				GraphBuilder.AddPass(
+					RDG_EVENT_NAME("ExecuteExampleComputeShader"),
+					PassParameters,
+					ERDGPassFlags::AsyncCompute,
+					[&PassParameters, ComputeShader, GroupCount](FRHIComputeCommandList& RHICmdList)
+					{
+						FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader, *PassParameters, GroupCount);
+					});
+				
+				FRDGTextureRef ResultTexture = RegisterExternalTexture(GraphBuilder, Height->GetRenderTargetTexture(), TEXT("Result_RT"));
+				AddCopyTexturePass(GraphBuilder, TmpTexture_Gradient, ResultTexture, FRHICopyTextureInfo());
+				
+			}
+		}
+		GraphBuilder.Execute();
+	});
+}
+
+void UComputerShaderFunction::DrawHeightMap(UTextureRenderTarget2D* InHeight, UTexture2D* InTMeshDepth, float Size, float Rotator)
+{
+	// if(InHeight == nullptr || InTMeshDepth == nullptr)
+	// 	return;
+	// FRenderTarget* Height = InHeight->GameThread_GetRenderTargetResource();
+	// UTexture* MeshDepth = InTMeshDepth;
+	// ENQUEUE_RENDER_COMMAND(SceneDrawCompletion)(
+	// [Height, MeshDepth, Size, Rotator](FRHICommandListImmediate& RHICmdList)
+	// {
+	// 	FRDGBuilder GraphBuilder(RHICmdList);
+	// 	{
+	// 		
+	// 		typename FDrawHeightMap::FPermutationDomain PermutationVector;
+	// 		TShaderMapRef<FDrawHeightMap> ComputeShader(GetGlobalShaderMap(GMaxRHIFeatureLevel), PermutationVector);
+	// 	
+	// 		bool bIsShaderValid = ComputeShader.IsValid();
+	// 	
+	// 		if (bIsShaderValid)
+	// 		{
+	// 			FDrawHeightMap::FParameters* PassParameters = GraphBuilder.AllocParameters<FDrawHeightMap::FParameters>();
+	// 			auto GroupCount = FComputeShaderUtils::GetGroupCount(FIntVector(Height->GetSizeXY().X, Height->GetSizeXY().Y, 1), FComputeShaderUtils::kGolden2DGroupSize);
+	// 			
+	// 			FRDGTextureRef TmpTexture_Height = ConvertToUVATexture(Height, GraphBuilder);
+	// 			FRDGTextureRef TMeshDepthTexture = RegisterExternalTexture(GraphBuilder, MeshDepth->GetResource()->GetTextureRHI(), TEXT("TMeshDepth_T"));
+	//
+	// 			PassParameters->T_TMeshDepth = TMeshDepthTexture;
+	// 			PassParameters->RW_CurrentSceneDepth = GraphBuilder.CreateUAV(TmpTexture_Height);
+	// 			PassParameters->Sampler	= TStaticSamplerState<SF_Bilinear>::GetRHI();
+	// 			// PassParameters->Size = Size;
+	// 			// PassParameters->RandomRotator = Rotator;
+	// 			
+	// 			GraphBuilder.AddPass(
+	// 				RDG_EVENT_NAME("ExecuteExampleComputeShader"),
+	// 				PassParameters,
+	// 				ERDGPassFlags::AsyncCompute,
+	// 				[&PassParameters, ComputeShader, GroupCount](FRHIComputeCommandList& RHICmdList)
+	// 				{
+	// 					FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader, *PassParameters, GroupCount);
+	// 				});
+	// 			
+	// 			FRDGTextureRef HeightTexture = RegisterExternalTexture(GraphBuilder, Height->GetRenderTargetTexture(), TEXT("Result_RT"));
+	// 			AddCopyTexturePass(GraphBuilder, TmpTexture_Height, HeightTexture, FRHICopyTextureInfo());
+	// 			
+	// 		}
+	// 	}
+	// 	GraphBuilder.Execute();
+	// });
+}
+
+void UComputerShaderFunction::DrawLinearColorsToRenderTarget(UTextureRenderTarget2D* InTextureTarget,
+	TArray<FLinearColor> Colors)
+{
+	if (Colors.Num() > InTextureTarget->SizeX * InTextureTarget->SizeY)
+		return;
+	
+	TArray<FLinearColor> TmpColors;
+	TmpColors.Init(FLinearColor::Black, InTextureTarget->SizeX * InTextureTarget->SizeY);
+	
+	FMemory::Memcpy(TmpColors.GetData(), Colors.GetData(), Colors.Num() * sizeof(FLinearColor));
+	FRenderTarget* TextureTarget = InTextureTarget->GameThread_GetRenderTargetResource();
+	ENQUEUE_RENDER_COMMAND(SceneDrawCompletion)(
+	[TextureTarget, TmpColors](FRHICommandListImmediate& RHICmdList)
+	{
+		FTexture2DRHIRef TextureRHI = TextureTarget->GetRenderTargetTexture();
+		uint32 DestStride;
+		void* DestData = RHILockTexture2D(TextureRHI, 0, RLM_WriteOnly, DestStride, false);
+		 if (!DestStride)
+		 	return;
+		
+		FMemory::Memcpy(DestData, TmpColors.GetData(), TextureTarget->GetSizeXY().X * TextureTarget->GetSizeXY().Y * sizeof(FLinearColor));
+		RHIUnlockTexture2D(TextureRHI, 0 ,false);
+	});
+}
+
+void UComputerShaderFunction::ConnectivityPixel(UTextureRenderTarget2D* InTextureTarget,
+	UTextureRenderTarget2D* InConnectivityMap)
+{
+	if (InTextureTarget == nullptr || InConnectivityMap == nullptr)
+		return;
+
+	FRenderTarget* TextureTarget = InTextureTarget->GameThread_GetRenderTargetResource();
+	FRenderTarget* ConnectivityMap = InConnectivityMap->GameThread_GetRenderTargetResource();
+	ENQUEUE_RENDER_COMMAND(SceneDrawCompletion)(
+	[TextureTarget, ConnectivityMap](FRHICommandListImmediate& RHICmdList)
+	{
+		FRDGBuilder GraphBuilder(RHICmdList);
+		{
+			
+			typename FConnectivityPixel::FPermutationDomain PermutationVector_Init(0);
+			TShaderMapRef<FConnectivityPixel> ComputeShader_Init(GetGlobalShaderMap(GMaxRHIFeatureLevel), PermutationVector_Init);
+			typename FConnectivityPixel::FPermutationDomain PermutationVector_FindIslands(1);
+			TShaderMapRef<FConnectivityPixel> ComputeShader_FindIslands(GetGlobalShaderMap(GMaxRHIFeatureLevel), PermutationVector_FindIslands);
+			typename FConnectivityPixel::FPermutationDomain PermutationVector_Count(2);
+			TShaderMapRef<FConnectivityPixel> ComputeShader_Count(GetGlobalShaderMap(GMaxRHIFeatureLevel), PermutationVector_Count);
+			typename FConnectivityPixel::FPermutationDomain PermutationVector_DrawTexture(3);
+			TShaderMapRef<FConnectivityPixel> ComputeShader_DrawTexture(GetGlobalShaderMap(GMaxRHIFeatureLevel), PermutationVector_DrawTexture);
+		
+			bool bIsShaderValid = ComputeShader_Init.IsValid();
+		
+			if (bIsShaderValid)
+			{
+				FConnectivityPixel::FParameters* PassParameters = GraphBuilder.AllocParameters<FConnectivityPixel::FParameters>();
+				auto GroupCount = FComputeShaderUtils::GetGroupCount(FIntVector(TextureTarget->GetSizeXY().X, TextureTarget->GetSizeXY().Y, 1), FComputeShaderUtils::kGolden2DGroupSize);
+				
+				FRDGTextureRef TmpTexture_ConnectivityMap = ConvertToUVATexture(ConnectivityMap, GraphBuilder);
+				FRDGTextureRef TextureTargetTexture = RegisterExternalTexture(GraphBuilder, TextureTarget->GetRenderTargetTexture(), TEXT("Input_RT"));
+				
+				FRDGTextureRef TmpTexture_LabelBufferA = ConvertToUVATextureFormat(ConnectivityMap, GraphBuilder, PF_R32_UINT);
+				FRDGTextureRef TmpTexture_LabelBufferB = ConvertToUVATextureFormat(ConnectivityMap, GraphBuilder, PF_R32_UINT);
+
+
+				const uint32 NumElements = TextureTarget->GetSizeXY().X * TextureTarget->GetSizeXY().Y;
+				const uint32 BytesPerElement = sizeof(uint32);
+				const uint32 TotalBytes = NumElements * BytesPerElement;
+				// 创建结构化缓冲区
+				FRHIResourceCreateInfo CreateSizeInfo(TEXT("SizeBuffer"));
+				FBufferRHIRef StructuredBuffer = RHICreateStructuredBuffer(
+					BytesPerElement,            // 每个元素的大小
+					TotalBytes,                 // 总字节数
+					BUF_Static | BUF_ShaderResource,         // 允许着色器访问
+					CreateSizeInfo
+				);
+		
+				// 创建Shader Resource View (SRV)
+				FShaderResourceViewRHIRef ShaderResourceView = RHICreateShaderResourceView(StructuredBuffer);
+				
+				const int32 BufferSize = NumElements;
+				FRHIResourceCreateInfo CreateInfo(TEXT("CountBuffer"));
+				FBufferRHIRef CountBufferRHI = RHICmdList.CreateVertexBuffer(
+					BufferSize,
+					BUF_UnorderedAccess | BUF_KeepCPUAccessible,
+					CreateInfo);
+				FUnorderedAccessViewRHIRef CountBufferUAV = RHICmdList.CreateUnorderedAccessView(
+					CountBufferRHI,
+					PF_R32_UINT );
+				RHICmdList.ClearUAVUint(CountBufferUAV, FUintVector4(0));
+				
+				PassParameters->InputTexture = TextureTargetTexture;
+				PassParameters->RW_ConnectivityPixel = GraphBuilder.CreateUAV(TmpTexture_ConnectivityMap);
+				PassParameters->RW_LabelBufferA = GraphBuilder.CreateUAV(TmpTexture_LabelBufferA);
+				PassParameters->RW_LabelBufferB = GraphBuilder.CreateUAV(TmpTexture_LabelBufferB);
+				PassParameters->Sampler	= TStaticSamplerState<SF_Bilinear>::GetRHI();
+				PassParameters->RW_LabelCounters = CountBufferUAV;
+				PassParameters->Step = 0;
+
+				//Init
+				GraphBuilder.AddPass(
+					RDG_EVENT_NAME("ExecuteExampleComputeShader"),
+					PassParameters,
+					ERDGPassFlags::AsyncCompute,
+					[&PassParameters, ComputeShader_Init, GroupCount](FRHIComputeCommandList& RHICmdList)
+					{
+						FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader_Init, *PassParameters, GroupCount);
+					});
+
+				//PassParameters->Step = 1;
+				for (int32 i = 0; i < TextureTarget->GetSizeXY().X / 2; i++)
+				{
+					GraphBuilder.AddPass(
+					RDG_EVENT_NAME("ExecuteExampleComputeShader"),
+					PassParameters,
+					ERDGPassFlags::AsyncCompute,
+					[&PassParameters, ComputeShader_FindIslands, GroupCount](FRHIComputeCommandList& RHICmdList)
+					{
+						FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader_FindIslands, *PassParameters, GroupCount);
+					});
+					AddCopyTexturePass(GraphBuilder, TmpTexture_LabelBufferB, TmpTexture_LabelBufferA, FRHICopyTextureInfo());
+				}
+				
+				//PassParameters->Step = 2;
+
+				GraphBuilder.AddPass(
+					RDG_EVENT_NAME("ExecuteExampleComputeShader"),
+					PassParameters,
+					ERDGPassFlags::AsyncCompute,
+					[&PassParameters, ComputeShader_Count, GroupCount](FRHIComputeCommandList& RHICmdList)
+					{
+						FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader_Count, *PassParameters, GroupCount);
+					});
+				//PassParameters->Step = 3;
+				
+				GraphBuilder.AddPass(
+				RDG_EVENT_NAME("ExecuteExampleComputeShader"),
+				PassParameters,
+				ERDGPassFlags::AsyncCompute,
+				[&PassParameters, ComputeShader_DrawTexture, GroupCount](FRHIComputeCommandList& RHICmdList)
+				{
+					FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader_DrawTexture, *PassParameters, GroupCount);
+				});
+
+				CountBufferUAV->Release();
+				FRDGTextureRef ConnectivityMapTexture = RegisterExternalTexture(GraphBuilder, ConnectivityMap->GetRenderTargetTexture(), TEXT("Connectivity_RT"));
+				AddCopyTexturePass(GraphBuilder, TmpTexture_ConnectivityMap, ConnectivityMapTexture, FRHICopyTextureInfo());
+			}
+		}
+		GraphBuilder.Execute();
+
+	});
+}
+
+void UComputerShaderFunction::BlurTexture(UTextureRenderTarget2D* InTextureTarget,
+	UTextureRenderTarget2D* OutBlurTexture, float BlurScale)
+{
+		if (InTextureTarget == nullptr || OutBlurTexture == nullptr)
+		return;
+
+	FRenderTarget* TextureTarget = InTextureTarget->GameThread_GetRenderTargetResource();
+	FRenderTarget* BlurTexture = OutBlurTexture->GameThread_GetRenderTargetResource();
+	ENQUEUE_RENDER_COMMAND(SceneDrawCompletion)(
+	[TextureTarget, BlurTexture, BlurScale](FRHICommandListImmediate& RHICmdList)
+	{
+		FRDGBuilder GraphBuilder(RHICmdList);
+		{
+			
+			typename FBlurTexture::FPermutationDomain PermutationVector;
+			TShaderMapRef<FBlurTexture> ComputeShader(GetGlobalShaderMap(GMaxRHIFeatureLevel), PermutationVector);
+			
+			bool bIsShaderValid = ComputeShader.IsValid();
+		
+			if (bIsShaderValid)
+			{
+				FBlurTexture::FParameters* PassParameters = GraphBuilder.AllocParameters<FBlurTexture::FParameters>();
+				auto GroupCount = FComputeShaderUtils::GetGroupCount(FIntVector(TextureTarget->GetSizeXY().X, TextureTarget->GetSizeXY().Y, 1), FComputeShaderUtils::kGolden2DGroupSize);
+				
+				FRDGTextureRef TmpTexture_BlurTexture = ConvertToUVATexture(BlurTexture, GraphBuilder);
+				FRDGTextureRef TextureTargetTexture = RegisterExternalTexture(GraphBuilder, TextureTarget->GetRenderTargetTexture(), TEXT("Input_RT"));
+				
+				PassParameters->T_BlurTexture = TextureTargetTexture;
+				PassParameters->RW_BlurTexture = GraphBuilder.CreateUAV(TmpTexture_BlurTexture);
+				PassParameters->Sampler	= TStaticSamplerState<SF_Bilinear>::GetRHI();
+				PassParameters->BlurScale = BlurScale;
+				
+				GraphBuilder.AddPass(
+					RDG_EVENT_NAME("ExecuteExampleComputeShader"),
+					PassParameters,
+					ERDGPassFlags::AsyncCompute,
+					[&PassParameters, ComputeShader, GroupCount](FRHIComputeCommandList& RHICmdList)
+					{
+						FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader, *PassParameters, GroupCount);
+					});
+				
+				FRDGTextureRef BlurTextureTexture = RegisterExternalTexture(GraphBuilder, BlurTexture->GetRenderTargetTexture(), TEXT("Connectivity_RT"));
+				AddCopyTexturePass(GraphBuilder, TmpTexture_BlurTexture, BlurTextureTexture, FRHICopyTextureInfo());
+			}
+		}
+		GraphBuilder.Execute();
+
+	});
+}
+
+void UComputerShaderFunction::UpPixelsMask(UTextureRenderTarget2D* InTextureTarget,
+	UTextureRenderTarget2D* OutUpTexture, float Threshould)
+{
+			if (InTextureTarget == nullptr || OutUpTexture == nullptr)
+		return;
+
+	FRenderTarget* TextureTarget = InTextureTarget->GameThread_GetRenderTargetResource();
+	FRenderTarget* UpTexture = OutUpTexture->GameThread_GetRenderTargetResource();
+	ENQUEUE_RENDER_COMMAND(SceneDrawCompletion)(
+	[TextureTarget, UpTexture, Threshould](FRHICommandListImmediate& RHICmdList)
+	{
+		FRDGBuilder GraphBuilder(RHICmdList);
+		{
+			
+			typename FUpPixelsMask::FPermutationDomain PermutationVector;
+			TShaderMapRef<FUpPixelsMask> ComputeShader(GetGlobalShaderMap(GMaxRHIFeatureLevel), PermutationVector);
+			
+			bool bIsShaderValid = ComputeShader.IsValid();
+		
+			if (bIsShaderValid)
+			{
+				FUpPixelsMask::FParameters* PassParameters = GraphBuilder.AllocParameters<FUpPixelsMask::FParameters>();
+				auto GroupCount = FComputeShaderUtils::GetGroupCount(FIntVector(TextureTarget->GetSizeXY().X, TextureTarget->GetSizeXY().Y, 1), FComputeShaderUtils::kGolden2DGroupSize);
+				
+				FRDGTextureRef TmpTexture_UpTexture = ConvertToUVATexture(UpTexture, GraphBuilder);
+				FRDGTextureRef TextureTargetTexture = RegisterExternalTexture(GraphBuilder, TextureTarget->GetRenderTargetTexture(), TEXT("Input_RT"));
+				
+				PassParameters->T_UpPixel = TextureTargetTexture;
+				PassParameters->RW_UpPixel = GraphBuilder.CreateUAV(TmpTexture_UpTexture);
+				PassParameters->Sampler	= TStaticSamplerState<SF_Bilinear>::GetRHI();
+				PassParameters->UpPixelThreshold = Threshould;
+				
+				GraphBuilder.AddPass(
+					RDG_EVENT_NAME("ExecuteExampleComputeShader"),
+					PassParameters,
+					ERDGPassFlags::AsyncCompute,
+					[&PassParameters, ComputeShader, GroupCount](FRHIComputeCommandList& RHICmdList)
+					{
+						FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader, *PassParameters, GroupCount);
+					});
+				
+				FRDGTextureRef UpTextureTexture = RegisterExternalTexture(GraphBuilder, UpTexture->GetRenderTargetTexture(), TEXT("Connectivity_RT"));
+				AddCopyTexturePass(GraphBuilder, TmpTexture_UpTexture, UpTextureTexture, FRHICopyTextureInfo());
+			}
+		}
+		GraphBuilder.Execute();
+
+	});
+}
+
+ACSGenerateCaptureScene::ACSGenerateCaptureScene()
+{
+	SceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("CaptureRoot"));
+	//SceneComponent->SetupAttachment(GetRootComponent(), TEXT("CaptureRoot"));
+	SetRootComponent(SceneComponent);
+	
+	Box = CreateDefaultSubobject<UBoxComponent>(TEXT("Box"));
+	Box->SetupAttachment(SceneComponent, TEXT("Box"));
+	Box->SetBoxExtent(FVector(50,50,50));
+	
+	CaptureSceneDepth = CreateDefaultSubobject<USceneCaptureComponent2D>(TEXT("CaptureSceneDepth"));
+	CaptureSceneDepth->OrthoWidth = 2048;
+	CaptureSceneDepth->ProjectionType = ECameraProjectionMode::Orthographic;
+	CaptureSceneDepth->CaptureSource = ESceneCaptureSource::SCS_SceneDepth;
+	CaptureSceneDepth->SetRelativeRotation(FRotator(-90, -90, 0));
+	CaptureSceneDepth->SetRelativeLocation(FVector(0, 0, 10000));
+	CaptureSceneDepth->bCaptureEveryFrame = false;
+	CaptureSceneDepth->SetupAttachment(SceneComponent, TEXT("CaptureSceneDepth"));
+	CaptureSceneNormal = CreateDefaultSubobject<USceneCaptureComponent2D>(TEXT("CaptureSceneNormal"));
+	CaptureSceneNormal->OrthoWidth = 2048;
+	CaptureSceneNormal->ProjectionType = ECameraProjectionMode::Orthographic;
+	CaptureSceneNormal->PrimitiveRenderMode = ESceneCapturePrimitiveRenderMode::PRM_UseShowOnlyList;
+	CaptureSceneNormal->CaptureSource = ESceneCaptureSource::SCS_Normal;
+	CaptureSceneNormal->bCaptureEveryFrame = false;
+	CaptureSceneNormal->SetupAttachment(CaptureSceneDepth, TEXT("CaptureSceneNormal"));
+}
+
+void ACSGenerateCaptureScene::OnConstruction(const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+	
+	Box->SetRelativeScale3D(FVector(CaptureSceneDepth->OrthoWidth / 100, CaptureSceneDepth->OrthoWidth / 100, MaxHeight / 100));
+	Box->SetRelativeLocation(FVector(0, 0, Scale3DZ * 50));
+	Box->AttachToComponent(RootComponent, FAttachmentTransformRules::KeepRelativeTransform);
+
+	CaptureSceneDepth->OrthoWidth = CaptureSize;
+	CaptureSceneDepth->SetRelativeLocation(FVector(0, 0, MaxHeight));
+	CaptureSceneNormal->OrthoWidth = CaptureSize;
+	
+}

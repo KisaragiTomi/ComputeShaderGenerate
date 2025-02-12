@@ -1,0 +1,95 @@
+#include "/Engine/Public/Platform.ush"
+#include "General.usf"
+
+SamplerState Sampler;
+
+
+uint Step;
+
+Texture2D<float4> InputTexture;
+RWTexture2D<float4> OutputColor;
+
+RWTexture2D<uint> RW_LabelBufferA;
+RWTexture2D<uint> RW_LabelBufferB;
+
+RWBuffer<uint> LabelCounters;
+//ConsumeStructuredBuffer<uint> FreeLabels;
+
+void CP_Init(Texture2D<float4> InputMap, uint3 DispatchThreadId, RWTexture2D<uint> LabelBufferA, RWTexture2D<uint> LabelBufferB)
+{
+	float MaxCell = 0;
+	InputMap.GetDimensions(MaxCell, MaxCell);
+	if (length(abs(InputMap[DispatchThreadId.xy])) > 0)
+	{
+		// 使用像素坐标生成唯一标签
+		uint label = DispatchThreadId.y * MaxCell + DispatchThreadId.x + 1; // +1避免0冲突
+		LabelBufferA[DispatchThreadId.xy] = label;
+		LabelBufferB[DispatchThreadId.xy] = label;
+	} else
+	{
+		LabelBufferA[DispatchThreadId.xy] = 0;
+		LabelBufferB[DispatchThreadId.xy] = 0;
+	}
+}
+
+void CP_Findislands(Texture2D<float4> InputMap, uint3 DispatchThreadId, RWTexture2D<uint> LabelBufferA, RWTexture2D<uint> LabelBufferB)
+{
+	uint currentLabel = LabelBufferA[DispatchThreadId.xy];
+	if (currentLabel == 0) return;
+
+	float MaxCell = 0;
+	InputMap.GetDimensions(MaxCell, MaxCell);
+
+	// 四邻域采样（上、下、左、右）
+	uint minNeighbor = currentLabel;
+	minNeighbor = min(minNeighbor, LabelBufferA[uint2(DispatchThreadId.x, max(DispatchThreadId.y-1, 0))]);
+	minNeighbor = min(minNeighbor, LabelBufferA[uint2(DispatchThreadId.x, min(DispatchThreadId.y+1, MaxCell-1))]);
+	minNeighbor = min(minNeighbor, LabelBufferA[uint2(max(DispatchThreadId.x-1, 0), DispatchThreadId.y)]);
+	minNeighbor = min(minNeighbor, LabelBufferA[uint2(min(DispatchThreadId.x+1, MaxCell-1), DispatchThreadId.y)]);
+
+	// 写入双缓冲的下一帧
+	LabelBufferB[DispatchThreadId.xy] = min(currentLabel, minNeighbor);
+}
+
+void CP_Count(uint3 DispatchThreadId, RWTexture2D<uint> LabelBufferA, RWBuffer<uint> LabelCounters)
+{
+	uint label = LabelBufferA[DispatchThreadId.xy];
+	if (label != 0) {
+		InterlockedAdd(LabelCounters[label], 1);
+	}
+}
+
+void CP_DrawTexture(Texture2D<float4> InputMap, uint3 DispatchThreadId, RWTexture2D<uint> LabelBufferA)
+{
+	uint label = LabelBufferA[DispatchThreadId.xy];
+	if (label == 0) {
+		OutputColor[DispatchThreadId.xy] = float4(0, 0, 0, 1); // 背景黑色
+		return;
+	}
+
+	// 读取该标签的像素数量
+	uint count = LabelCounters[label];
+
+	float MaxCell = 0;
+	InputMap.GetDimensions(MaxCell, MaxCell);
+	// 归一化颜色映射（假设最大岛屿为MaxCount）
+	float intensity = saturate(count / (MaxCell * MaxCell) * 4);
+	OutputColor[DispatchThreadId.xy] = float4(intensity, count, 0, 1); // 红色通道表示大小
+}
+
+[numthreads(THREADGROUPSIZE_X, THREADGROUPSIZE_Y, THREADGROUPSIZE_Z)]
+void ConnectivityPixel(
+					   uint3 DispatchThreadId : SV_DispatchThreadID,
+					   uint GroupIndex : SV_GroupIndex)
+{
+#if ENTRY_FUNCTION == CP_Init
+	CP_Init(InputTexture, DispatchThreadId, RW_LabelBufferA, RW_LabelBufferB);
+#elif ENTRY_FUNCTION == CP_FindIslands 
+	CP_Findislands(InputTexture, DispatchThreadId, RW_LabelBufferA, RW_LabelBufferB);
+
+#elif ENTRY_FUNCTION == CP_Count
+	CP_Count(DispatchThreadId, RW_LabelBufferA, LabelCounters)
+#elif ENTRY_FUNCTION == CP_DrawTexture
+	CP_DrawTexture(InputTexture, DispatchThreadId, RW_LabelBufferA)
+#endif
+}
