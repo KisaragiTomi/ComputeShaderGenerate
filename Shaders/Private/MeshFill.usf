@@ -248,16 +248,3 @@ void DrawCurrentHeightMap(
 //     RW_CurrentSceneDepth[DispatchThreadId.xy].y = Mask;
 // }
 
-[numthreads(THREADGROUPSIZE_X, THREADGROUPSIZE_Y, THREADGROUPSIZE_Z)]
-void CalculateGradient(
-                       uint3 DispatchThreadId : SV_DispatchThreadID,
-                       uint GroupIndex : SV_GroupIndex)
-{
-    float MaxCell = 0;
-    T_Height.GetDimensions(MaxCell, MaxCell);
-    float2 uv = DispatchThreadId.xy / (MaxCell - 1);
-    float4 Gradient = float4(0, 0, 0, 0);
-    Gradient = ComputeGradientT(Sampler, T_Height, uv);
-    RW_Gradient[DispatchThreadId.xy] = Gradient;
-}
-

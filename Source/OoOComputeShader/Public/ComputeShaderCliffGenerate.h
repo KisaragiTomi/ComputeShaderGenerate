@@ -2,9 +2,9 @@
 //
 #include "CoreMinimal.h"
 #include "Engine/TextureRenderTarget2D.h"
-#include "ComputerShaderSceneCapture.h"
+#include "ComputeShaderSceneCapture.h"
 //
-#include "ComputerShaderCliffGenerate.generated.h"
+#include "ComputeShaderCliffGenerate.generated.h"
 //
 //
 // //This struct act as a container for all the parameters that the client needs to pass to the Compute Shader Manager.
@@ -49,7 +49,7 @@ public:
 };
 
 UCLASS()
-class OOOCOMPUTESHADER_API UComputerShaderCliffGenerateFunctions : public UBlueprintFunctionLibrary
+class OOOCOMPUTESHADER_API UComputeShaderCliffGenerateFunctions : public UBlueprintFunctionLibrary
 {
 	GENERATED_BODY()
 	UFUNCTION(BlueprintCallable, Category = "ComputeShader")

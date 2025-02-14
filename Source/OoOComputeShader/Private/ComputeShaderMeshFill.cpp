@@ -1,7 +1,7 @@
-#include "ComputerShaderMeshFill.h"
+#include "ComputeShaderMeshFill.h"
 
 #include "ClearQuad.h"
-#include "ComputerShaderGenerateHepler.h"
+#include "ComputeShaderGenerateHepler.h"
 #include "GlobalShader.h"
 #include "MaterialShader.h"
 #include "ShaderParameterStruct.h"
@@ -9,12 +9,12 @@
 #include "RenderGraphUtils.h"
 #include "RenderGraphBuilder.h"
 #include "RenderTargetPool.h"
-#include "ComputerShaderGenerateHepler.h"
+#include "ComputeShaderGenerateHepler.h"
 #include "EngineUtils.h"
 #include "Components/SceneCaptureComponent2D.h"
 #include "Engine/StaticMeshActor.h"
 #include "Kismet/KismetRenderingLibrary.h"
-#include "ComputerShaderGeneral.h"
+#include "ComputeShaderGeneral.h"
 
 DECLARE_STATS_GROUP(TEXT("CSMeshFill"), STATGROUP_CSGenerate, STATCAT_Advanced);
 DECLARE_CYCLE_STAT(TEXT("CS Execute"), STAT_CSGenerate_Execute, STATGROUP_CSGenerate)
@@ -251,7 +251,7 @@ void FMeshFillCSInterface::DispatchRenderThread(FRHICommandListImmediate& RHICmd
 	
 }
 
-void UComputerShaderMeshFillFunctions::CSMeshFill(ACSGenerateCaptureScene* Capturer, UStaticMesh* StaticMesh, UTextureRenderTarget2D* DubugView, UTextureRenderTarget2D* Result, UTexture2D* TMeshDepth, float SpawnSize, float TestSizeScale, FName Tag)
+void UComputeShaderMeshFillFunctions::CSMeshFill(ACSGenerateCaptureScene* Capturer, UStaticMesh* StaticMesh, UTextureRenderTarget2D* DubugView, UTextureRenderTarget2D* Result, UTexture2D* TMeshDepth, float SpawnSize, float TestSizeScale, FName Tag)
 {
 	SCOPE_CYCLE_COUNTER(STAT_CSGenerate_Tatal);
 	float CapturerSize = Capturer->CaptureSize;
@@ -277,7 +277,7 @@ void UComputerShaderMeshFillFunctions::CSMeshFill(ACSGenerateCaptureScene* Captu
 
 	{
 		SCOPE_CYCLE_COUNTER(STAT_CSGenerate_Execute);
-		UComputerShaderMeshFillFunctions::CalculateMeshLoctionAndRotation(Parameter);
+		UComputeShaderMeshFillFunctions::CalculateMeshLoctionAndRotation(Parameter);
 		FlushRenderingCommands();
 	}
 	
@@ -310,7 +310,7 @@ void UComputerShaderMeshFillFunctions::CSMeshFill(ACSGenerateCaptureScene* Captu
 	Capturer->CaptureSceneNormal->ShowOnlyActors = StaticMeshActors;
 }
 
-void UComputerShaderMeshFillFunctions::CSMeshFillMult(ACSGenerateCaptureScene* Capturer, UStaticMesh* StaticMesh,
+void UComputeShaderMeshFillFunctions::CSMeshFillMult(ACSGenerateCaptureScene* Capturer, UStaticMesh* StaticMesh,
                                               UTextureRenderTarget2D* DubugView, UTextureRenderTarget2D* Result, UTextureRenderTarget2D* CurrentSceneDepth, UTexture2D* TMeshDepth, int32 Iteration,
                                               float SpawnSize, float TestSizeScale, FName Tag)
 {
@@ -339,7 +339,7 @@ void UComputerShaderMeshFillFunctions::CSMeshFillMult(ACSGenerateCaptureScene* C
 
 	{
 		SCOPE_CYCLE_COUNTER(STAT_CSGenerate_Execute);
-		UComputerShaderMeshFillFunctions::CalculateMeshLoctionAndRotationMult(Parameter, 1);
+		UComputeShaderMeshFillFunctions::CalculateMeshLoctionAndRotationMult(Parameter, 1);
 		FlushRenderingCommands();
 	}
 	TArray<FLinearColor> LinearSamples;
@@ -392,7 +392,7 @@ void UComputerShaderMeshFillFunctions::CSMeshFillMult(ACSGenerateCaptureScene* C
 	Capturer->CaptureSceneNormal->ShowOnlyActors = StaticMeshActors;
 }
 
-void UComputerShaderMeshFillFunctions::CalculateMeshLoctionAndRotation(FCSGenerateParameter Params)
+void UComputeShaderMeshFillFunctions::CalculateMeshLoctionAndRotation(FCSGenerateParameter Params)
 {
 	if (!Params.IsValid())
 		return;
@@ -482,7 +482,7 @@ void UComputerShaderMeshFillFunctions::CalculateMeshLoctionAndRotation(FCSGenera
 	});
 }
 
-void UComputerShaderMeshFillFunctions::CalculateMeshLoctionAndRotationMult(FCSGenerateParameter Params, int32 NumIteraion)
+void UComputeShaderMeshFillFunctions::CalculateMeshLoctionAndRotationMult(FCSGenerateParameter Params, int32 NumIteraion)
 {
 	if (!Params.IsValidMult())
 		return;
@@ -608,55 +608,7 @@ void UComputerShaderMeshFillFunctions::CalculateMeshLoctionAndRotationMult(FCSGe
 	});
 }
 
-void UComputerShaderMeshFillFunctions::CopmputerGradient(UTextureRenderTarget2D* InHeight, UTexture* InMeshDepth)
-{
-	if(InHeight == nullptr || InMeshDepth == nullptr)
-		return;
-	FRenderTarget* Height = InHeight->GameThread_GetRenderTargetResource();
-	UTexture* TMeshDepth = InMeshDepth;
-	
-	ENQUEUE_RENDER_COMMAND(SceneDrawCompletion)(
-	[Height, TMeshDepth](FRHICommandListImmediate& RHICmdList)
-	{
-		FRDGBuilder GraphBuilder(RHICmdList);
-		{
-			
-			typename FCalculateGradient::FPermutationDomain PermutationVector;
-			TShaderMapRef<FCalculateGradient> ComputeShader(GetGlobalShaderMap(GMaxRHIFeatureLevel), PermutationVector);
-		
-			bool bIsShaderValid = ComputeShader.IsValid();
-		
-			if (bIsShaderValid)
-			{
-				FCalculateGradient::FParameters* PassParameters = GraphBuilder.AllocParameters<FCalculateGradient::FParameters>();
-				auto GroupCount = FComputeShaderUtils::GetGroupCount(FIntVector(Height->GetSizeXY().X, Height->GetSizeXY().Y, 1), FComputeShaderUtils::kGolden2DGroupSize);
-				
-				FRDGTextureRef TmpTexture_Gradient = ConvertToUVATexture(Height, GraphBuilder);
-				FRDGTextureRef TMeshDepthTexture = RegisterExternalTexture(GraphBuilder, TMeshDepth->GetResource()->GetTextureRHI(), TEXT("TMeshDepth_T"));
-				
-				PassParameters->T_Height = TMeshDepthTexture;
-				PassParameters->RW_Gradient = GraphBuilder.CreateUAV(TmpTexture_Gradient);
-				PassParameters->Sampler	= TStaticSamplerState<SF_Bilinear>::GetRHI();
-				
-				GraphBuilder.AddPass(
-					RDG_EVENT_NAME("ExecuteExampleComputeShader"),
-					PassParameters,
-					ERDGPassFlags::AsyncCompute,
-					[&PassParameters, ComputeShader, GroupCount](FRHIComputeCommandList& RHICmdList)
-					{
-						FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader, *PassParameters, GroupCount);
-					});
-				
-				FRDGTextureRef ResultTexture = RegisterExternalTexture(GraphBuilder, Height->GetRenderTargetTexture(), TEXT("Result_RT"));
-				AddCopyTexturePass(GraphBuilder, TmpTexture_Gradient, ResultTexture, FRHICopyTextureInfo());
-				
-			}
-		}
-		GraphBuilder.Execute();
-	});
-}
-
-void UComputerShaderMeshFillFunctions::DrawHeightMap(UTextureRenderTarget2D* InHeight, UTexture2D* InTMeshDepth, float Size, float Rotator)
+void UComputeShaderMeshFillFunctions::DrawHeightMap(UTextureRenderTarget2D* InHeight, UTexture2D* InTMeshDepth, float Size, float Rotator)
 {
 
 }

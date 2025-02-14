@@ -5,9 +5,9 @@
 #include "Kismet/BlueprintAsyncActionBase.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "Components/BoxComponent.h"
-#include "ComputerShaderSceneCapture.h"
+#include "ComputeShaderSceneCapture.h"
 //
-#include "ComputerShaderMeshFill.generated.h"
+#include "ComputeShaderMeshFill.generated.h"
 //
 //
 // //This struct act as a container for all the parameters that the client needs to pass to the Compute Shader Manager.
@@ -103,7 +103,7 @@ public:
 };
 
 UCLASS() // Change the _API to match your project
-class OOOCOMPUTESHADER_API UComputerShaderMeshFill : public UBlueprintAsyncActionBase
+class OOOCOMPUTESHADER_API UComputeShaderMeshFill : public UBlueprintAsyncActionBase
 {
 	GENERATED_BODY()
 
@@ -124,9 +124,9 @@ public:
 	}
 
 	UFUNCTION(BlueprintCallable, meta = (BlueprintInternalUseOnly = "true", Category = "ComputeShader", WorldContext = "WorldContextObject"))
-	static UComputerShaderMeshFill* ExecuteDrawHoldTexture(UObject* WorldContextObject, UTextureRenderTarget2D* ColorRT, UTextureRenderTarget2D* UVRT, UTextureRenderTarget2D* DrawRT)
+	static UComputeShaderMeshFill* ExecuteDrawHoldTexture(UObject* WorldContextObject, UTextureRenderTarget2D* ColorRT, UTextureRenderTarget2D* UVRT, UTextureRenderTarget2D* DrawRT)
 	{
-		UComputerShaderMeshFill* Action = NewObject<UComputerShaderMeshFill>();
+		UComputeShaderMeshFill* Action = NewObject<UComputeShaderMeshFill>();
 		Action->ColorRT = ColorRT;
 		Action->UVRT = UVRT;
 		Action->DrawRT = DrawRT;
@@ -142,7 +142,7 @@ public:
 };
 
 UCLASS()
-class OOOCOMPUTESHADER_API UComputerShaderMeshFillFunctions : public UBlueprintFunctionLibrary
+class OOOCOMPUTESHADER_API UComputeShaderMeshFillFunctions : public UBlueprintFunctionLibrary
 {
 	GENERATED_BODY()
 	UFUNCTION(BlueprintCallable, Category = "ComputeShader")
@@ -160,9 +160,6 @@ class OOOCOMPUTESHADER_API UComputerShaderMeshFillFunctions : public UBlueprintF
 
 	UFUNCTION(BlueprintCallable, Category = "ComputeShader")
 	static void CalculateMeshLoctionAndRotationMult(FCSGenerateParameter Params, int32 NumIteraion);
-
-	UFUNCTION(BlueprintCallable, Category = "ComputeShader")
-	static void CopmputerGradient(UTextureRenderTarget2D* InHeight, UTexture* InMeshDepth);
 
 	UFUNCTION(BlueprintCallable, Category = "ComputeShader")
 	static void DrawHeightMap(UTextureRenderTarget2D* InHeight, UTexture2D* InTMeshDepth, float Size, float Rotator);

@@ -6,7 +6,7 @@
 #include "Engine/TextureRenderTarget2D.h"
 #include "Components/BoxComponent.h"
 //
-#include "ComputerShaderSceneCapture.generated.h"
+#include "ComputeShaderSceneCapture.generated.h"
 //
 //
 // //This struct act as a container for all the parameters that the client needs to pass to the Compute Shader Manager.

@@ -29,7 +29,7 @@ struct OOOCOMPUTESHADER_API FOoOCSParameters
 	}
 };
 
-namespace ComputerShaderFunc
+namespace ComputeShaderFunc
 {
 	void OoOCS(FRDGBuilder GraphBuilder, FOoOCSParameters Params);
 }

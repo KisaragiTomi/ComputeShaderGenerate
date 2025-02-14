@@ -34,9 +34,9 @@ void BlurTexture(
 	T_BlurTexture.GetDimensions(MaxCell, MaxCell);
 	float2 uv = DispatchThreadId.xy / (MaxCell - 1);
 	float4 BlurColor = float4(0, 0, 0, 0);
-#if ENTRY_FUNCTION == BT_Texture
+#if USE_BLURVECTOR4TEXTUR
 	BlurColor = BlurPixel(Sampler, T_BlurTexture, uv);
-#elif ENTRY_FUNCTION == BT_Normal
+#elif USE_BLURNORMALTEXTURE
 	BlurColor = BlurNormalPixel(Sampler, T_BlurTexture, uv);
 #endif
 	BlurColor = lerp(T_BlurTexture[DispatchThreadId.xy], BlurColor, BlurScale);
@@ -46,6 +46,7 @@ void BlurTexture(
 Texture2D T_UpPixel;
 RWTexture2D<float4> RW_UpPixel;
 float UpPixelThreshold;
+int Channel;
 
 [numthreads(THREADGROUPSIZE_X, THREADGROUPSIZE_Y, THREADGROUPSIZE_Z)]
 void UpPixel(
@@ -55,6 +56,6 @@ void UpPixel(
 	float3 NormalColor = T_UpPixel[DispatchThreadId.xy].xyz;
 	float dotvalue = dot(NormalColor, float3(0, 0, 1));
 	
-	RW_UpPixel[DispatchThreadId.xy] = float4(float(dotvalue > UpPixelThreshold), 0, 0, 0);
+	RW_UpPixel[DispatchThreadId.xy][Channel] = float(dotvalue > UpPixelThreshold);
   
 }

@@ -35,5 +35,36 @@ namespace CSHepler
 		}
 		return -1;
 	}
-	
+
+
+	FUnorderedAccessViewRHIRef CreateRWBuffer(FRHICommandListImmediate& RHICmdList, uint32 NumElements, uint32 BytesPerElement, EPixelFormat Format = PF_A16B16G16R16)
+	{
+		const uint32 TotalBytes = NumElements * BytesPerElement;
+		// 创建结构化缓冲区
+		FRHIResourceCreateInfo CreateSizeInfo(TEXT("SizeBuffer"));
+		FBufferRHIRef StructuredBuffer = RHICreateStructuredBuffer(
+			BytesPerElement,            // 每个元素的大小
+			TotalBytes,                 // 总字节数
+			BUF_Static | BUF_ShaderResource,         // 允许着色器访问
+			CreateSizeInfo
+		);
+		
+		// 创建Shader Resource View (SRV)
+		FShaderResourceViewRHIRef ShaderResourceView = RHICreateShaderResourceView(StructuredBuffer);
+				
+		const int32 BufferSize = NumElements;
+		FRHIResourceCreateInfo CreateInfo(TEXT("CountBuffer"));
+		FBufferRHIRef CountBufferRHI = RHICmdList.CreateVertexBuffer(
+			BufferSize,
+			BUF_UnorderedAccess | BUF_KeepCPUAccessible,
+			CreateInfo);
+		FUnorderedAccessViewRHIRef BufferUAV = RHICmdList.CreateUnorderedAccessView(
+			CountBufferRHI,
+			Format );
+		RHICmdList.ClearUAVUint(BufferUAV, FUintVector4(0));
+		return BufferUAV;
+	}
+
+
+				
 }

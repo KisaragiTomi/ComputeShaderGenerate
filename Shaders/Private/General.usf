@@ -3,6 +3,36 @@
 #define PI 3.14159265358979323846264f
 #define PI2 6.2831853071795864769252866f
 
+// 1D 随机数生成
+float Random1D(float value) {
+    return frac(sin(value + b) * a);
+}
+
+// 2D 随机数生成
+float2 Random2D(float2 value) {
+    return float2(
+        frac(sin(dot(value.xy, float2(12.9898, 78.233))) * 43758.5453),
+        frac(sin(dot(value.xy, float2(39.346, 31.132))) * 43758.5453)
+    );
+}
+
+// 3D 随机数生成
+float3 Random3D(float3 value) {
+    return float3(
+        frac(sin(dot(value.xyz, float3(12.9898, 78.233, 45.164))) * 43758.5453),
+        frac(sin(dot(value.xyz, float3(39.346, 31.132, 74.989))) * 43758.5453),
+        frac(sin(dot(value.xyz, float3(23.543, 45.345, 67.890))) * 43758.5453)
+    );
+}
+
+float4 Random4D(float4 value) {
+    return float4(
+        frac(sin(dot(value.xyz, float3(12.9898, 78.233, 45.164))) * 43758.5453),
+        frac(sin(dot(value.xyz, float3(39.346, 31.132, 74.989))) * 43758.5453),
+        frac(sin(dot(value.xyz, float3(23.543, 45.345, 67.890))) * 43758.5453),
+        frac(sin(dot(value.xyz, float3(23.543, 45.345, 67.890))) * 43758.5453)
+    );
+}
 
 float2 ScaleUV(float2 UV, float2 Scale)
 {

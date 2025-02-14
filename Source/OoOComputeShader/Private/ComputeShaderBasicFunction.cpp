@@ -1,6 +1,6 @@
-#include "ComputerShaderBasicFunction.h"
+#include "ComputeShaderBasicFunction.h"
 
-#include "ComputerShaderGenerateHepler.h"
+#include "ComputeShaderGenerateHepler.h"
 #include "GlobalShader.h"
 #include "MaterialShader.h"
 #include "ShaderParameterStruct.h"
@@ -8,17 +8,17 @@
 #include "RenderGraphUtils.h"
 #include "RenderGraphBuilder.h"
 #include "RenderTargetPool.h"
-#include "ComputerShaderGenerateHepler.h"
+#include "ComputeShaderGenerateHepler.h"
 #include "EngineUtils.h"
 #include "Components/SceneCaptureComponent2D.h"
 #include "Engine/StaticMeshActor.h"
 #include "Kismet/KismetRenderingLibrary.h"
-#include "ComputerShaderGeneral.h"
+#include "ComputeShaderGeneral.h"
 
 
 using namespace CSHepler;
 
-void UComputerShaderBasicFunction::DrawLinearColorsToRenderTarget(UTextureRenderTarget2D* InTextureTarget,
+void UComputeShaderBasicFunction::DrawLinearColorsToRenderTarget(UTextureRenderTarget2D* InTextureTarget,
 	TArray<FLinearColor> Colors)
 {
 	if (Colors.Num() > InTextureTarget->SizeX * InTextureTarget->SizeY)
@@ -43,27 +43,34 @@ void UComputerShaderBasicFunction::DrawLinearColorsToRenderTarget(UTextureRender
 	});
 }
 
-void UComputerShaderBasicFunction::ConnectivityPixel(UTextureRenderTarget2D* InTextureTarget,
-	UTextureRenderTarget2D* InConnectivityMap)
+void UComputeShaderBasicFunction::ConnectivityPixel(UTextureRenderTarget2D* InTextureTarget,
+	UTextureRenderTarget2D* InConnectivityMap, int32 Channel, UTextureRenderTarget2D* InDebugView)
 {
-	if (InTextureTarget == nullptr || InConnectivityMap == nullptr)
+	if (InTextureTarget == nullptr || InConnectivityMap == nullptr || InDebugView == nullptr)
 		return;
-
+	InTextureTarget->ResizeTarget(128, 128);
+	InConnectivityMap->ResizeTarget(128, 128);
+	InDebugView->ResizeTarget(128, 128);
 	FRenderTarget* TextureTarget = InTextureTarget->GameThread_GetRenderTargetResource();
 	FRenderTarget* ConnectivityMap = InConnectivityMap->GameThread_GetRenderTargetResource();
+	FRenderTarget* DebugView = InDebugView->GameThread_GetRenderTargetResource();
 	ENQUEUE_RENDER_COMMAND(SceneDrawCompletion)(
-	[TextureTarget, ConnectivityMap](FRHICommandListImmediate& RHICmdList)
+	[=](FRHICommandListImmediate& RHICmdList)
 	{
 		FRDGBuilder GraphBuilder(RHICmdList);
 		{
 			
-			typename FConnectivityPixel::FPermutationDomain PermutationVector_Init(0);
+			typename FConnectivityPixel::FPermutationDomain PermutationVector_Init;
+			PermutationVector_Init.Set<FConnectivityPixel::FConnectivityPiexlStep>(FConnectivityPixel::EConnectivityStep::CP_Init);
 			TShaderMapRef<FConnectivityPixel> ComputeShader_Init(GetGlobalShaderMap(GMaxRHIFeatureLevel), PermutationVector_Init);
-			typename FConnectivityPixel::FPermutationDomain PermutationVector_FindIslands(1);
+			typename FConnectivityPixel::FPermutationDomain PermutationVector_FindIslands;
+			PermutationVector_FindIslands.Set<FConnectivityPixel::FConnectivityPiexlStep>(FConnectivityPixel::EConnectivityStep::CP_FindIslands);
 			TShaderMapRef<FConnectivityPixel> ComputeShader_FindIslands(GetGlobalShaderMap(GMaxRHIFeatureLevel), PermutationVector_FindIslands);
-			typename FConnectivityPixel::FPermutationDomain PermutationVector_Count(2);
+			typename FConnectivityPixel::FPermutationDomain PermutationVector_Count;
+			PermutationVector_Count.Set<FConnectivityPixel::FConnectivityPiexlStep>(FConnectivityPixel::EConnectivityStep::CP_Count);
 			TShaderMapRef<FConnectivityPixel> ComputeShader_Count(GetGlobalShaderMap(GMaxRHIFeatureLevel), PermutationVector_Count);
-			typename FConnectivityPixel::FPermutationDomain PermutationVector_DrawTexture(3);
+			typename FConnectivityPixel::FPermutationDomain PermutationVector_DrawTexture;
+			PermutationVector_DrawTexture.Set<FConnectivityPixel::FConnectivityPiexlStep>(FConnectivityPixel::EConnectivityStep::CP_DrawTexture);
 			TShaderMapRef<FConnectivityPixel> ComputeShader_DrawTexture(GetGlobalShaderMap(GMaxRHIFeatureLevel), PermutationVector_DrawTexture);
 		
 			bool bIsShaderValid = ComputeShader_Init.IsValid();
@@ -74,49 +81,31 @@ void UComputerShaderBasicFunction::ConnectivityPixel(UTextureRenderTarget2D* InT
 				auto GroupCount = FComputeShaderUtils::GetGroupCount(FIntVector(TextureTarget->GetSizeXY().X, TextureTarget->GetSizeXY().Y, 1), FComputeShaderUtils::kGolden2DGroupSize);
 				
 				FRDGTextureRef TmpTexture_ConnectivityMap = ConvertToUVATexture(ConnectivityMap, GraphBuilder);
+				FRDGTextureRef TmpTexture_DebugView = ConvertToUVATexture(DebugView, GraphBuilder);
 				FRDGTextureRef TextureTargetTexture = RegisterExternalTexture(GraphBuilder, TextureTarget->GetRenderTargetTexture(), TEXT("Input_RT"));
 				
-				FRDGTextureRef TmpTexture_LabelBufferA = ConvertToUVATextureFormat(ConnectivityMap, GraphBuilder, PF_R32_UINT);
-				FRDGTextureRef TmpTexture_LabelBufferB = ConvertToUVATextureFormat(ConnectivityMap, GraphBuilder, PF_R32_UINT);
-
+				FRDGTextureRef TmpTexture_LabelBufferA = ConvertToUVATextureFormat(ConnectivityMap, GraphBuilder, PF_A32B32G32R32F);
+				FRDGTextureRef TmpTexture_LabelBufferB = ConvertToUVATextureFormat(ConnectivityMap, GraphBuilder, PF_A32B32G32R32F);
 
 				const uint32 NumElements = TextureTarget->GetSizeXY().X * TextureTarget->GetSizeXY().Y;
 				const uint32 BytesPerElement = sizeof(uint32);
-				const uint32 TotalBytes = NumElements * BytesPerElement;
-				// 创建结构化缓冲区
-				FRHIResourceCreateInfo CreateSizeInfo(TEXT("SizeBuffer"));
-				FBufferRHIRef StructuredBuffer = RHICreateStructuredBuffer(
-					BytesPerElement,            // 每个元素的大小
-					TotalBytes,                 // 总字节数
-					BUF_Static | BUF_ShaderResource,         // 允许着色器访问
-					CreateSizeInfo
-				);
-		
-				// 创建Shader Resource View (SRV)
-				FShaderResourceViewRHIRef ShaderResourceView = RHICreateShaderResourceView(StructuredBuffer);
-				
-				const int32 BufferSize = NumElements;
-				FRHIResourceCreateInfo CreateInfo(TEXT("CountBuffer"));
-				FBufferRHIRef CountBufferRHI = RHICmdList.CreateVertexBuffer(
-					BufferSize,
-					BUF_UnorderedAccess | BUF_KeepCPUAccessible,
-					CreateInfo);
-				FUnorderedAccessViewRHIRef CountBufferUAV = RHICmdList.CreateUnorderedAccessView(
-					CountBufferRHI,
-					PF_R32_UINT );
-				RHICmdList.ClearUAVUint(CountBufferUAV, FUintVector4(0));
+				FRDGBufferRef Tmp_CountBuffer = GraphBuilder.CreateBuffer(FRDGBufferDesc::CreateBufferDesc(BytesPerElement, NumElements), TEXT("CountBuffer"));
+				FRDGBufferUAVRef Tmp_CountBufferUAV = GraphBuilder.CreateUAV(Tmp_CountBuffer);
+				AddClearUAVPass(GraphBuilder,Tmp_CountBufferUAV, 0);
+
 				
 				PassParameters->InputTexture = TextureTargetTexture;
 				PassParameters->RW_ConnectivityPixel = GraphBuilder.CreateUAV(TmpTexture_ConnectivityMap);
 				PassParameters->RW_LabelBufferA = GraphBuilder.CreateUAV(TmpTexture_LabelBufferA);
 				PassParameters->RW_LabelBufferB = GraphBuilder.CreateUAV(TmpTexture_LabelBufferB);
+				PassParameters->RW_DebugView = GraphBuilder.CreateUAV(TmpTexture_DebugView);
 				PassParameters->Sampler	= TStaticSamplerState<SF_Bilinear>::GetRHI();
-				PassParameters->RW_LabelCounters = CountBufferUAV;
-				PassParameters->Step = 0;
-
+				PassParameters->RW_LabelCounters = Tmp_CountBufferUAV;
+				PassParameters->Channel = Channel;
+				
 				//Init
 				GraphBuilder.AddPass(
-					RDG_EVENT_NAME("ExecuteExampleComputeShader"),
+					RDG_EVENT_NAME("Init"),
 					PassParameters,
 					ERDGPassFlags::AsyncCompute,
 					[&PassParameters, ComputeShader_Init, GroupCount](FRHIComputeCommandList& RHICmdList)
@@ -124,11 +113,12 @@ void UComputerShaderBasicFunction::ConnectivityPixel(UTextureRenderTarget2D* InT
 						FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader_Init, *PassParameters, GroupCount);
 					});
 
-				//PassParameters->Step = 1;
-				for (int32 i = 0; i < TextureTarget->GetSizeXY().X / 2; i++)
+				int32 Iteration = TextureTarget->GetSizeXY().X / 2;
+				//Iteration = 2;
+				for (int32 i = 0; i < Iteration; i++)
 				{
 					GraphBuilder.AddPass(
-					RDG_EVENT_NAME("ExecuteExampleComputeShader"),
+					RDG_EVENT_NAME("FindIslands"),
 					PassParameters,
 					ERDGPassFlags::AsyncCompute,
 					[&PassParameters, ComputeShader_FindIslands, GroupCount](FRHIComputeCommandList& RHICmdList)
@@ -137,21 +127,18 @@ void UComputerShaderBasicFunction::ConnectivityPixel(UTextureRenderTarget2D* InT
 					});
 					AddCopyTexturePass(GraphBuilder, TmpTexture_LabelBufferB, TmpTexture_LabelBufferA, FRHICopyTextureInfo());
 				}
-				
-				//PassParameters->Step = 2;
 
 				GraphBuilder.AddPass(
-					RDG_EVENT_NAME("ExecuteExampleComputeShader"),
+					RDG_EVENT_NAME("Count"),
 					PassParameters,
 					ERDGPassFlags::AsyncCompute,
 					[&PassParameters, ComputeShader_Count, GroupCount](FRHIComputeCommandList& RHICmdList)
 					{
 						FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader_Count, *PassParameters, GroupCount);
 					});
-				//PassParameters->Step = 3;
 				
 				GraphBuilder.AddPass(
-				RDG_EVENT_NAME("ExecuteExampleComputeShader"),
+				RDG_EVENT_NAME("DrawTexture"),
 				PassParameters,
 				ERDGPassFlags::AsyncCompute,
 				[&PassParameters, ComputeShader_DrawTexture, GroupCount](FRHIComputeCommandList& RHICmdList)
@@ -159,17 +146,19 @@ void UComputerShaderBasicFunction::ConnectivityPixel(UTextureRenderTarget2D* InT
 					FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader_DrawTexture, *PassParameters, GroupCount);
 				});
 
-				CountBufferUAV->Release();
+				//CountBufferUAV->Release();
 				FRDGTextureRef ConnectivityMapTexture = RegisterExternalTexture(GraphBuilder, ConnectivityMap->GetRenderTargetTexture(), TEXT("Connectivity_RT"));
 				AddCopyTexturePass(GraphBuilder, TmpTexture_ConnectivityMap, ConnectivityMapTexture, FRHICopyTextureInfo());
+
+				FRDGTextureRef DebugViewTexture = RegisterExternalTexture(GraphBuilder, DebugView->GetRenderTargetTexture(), TEXT("Connectivity_RT"));
+				AddCopyTexturePass(GraphBuilder, TmpTexture_DebugView, DebugViewTexture, FRHICopyTextureInfo());
 			}
 		}
 		GraphBuilder.Execute();
-
 	});
 }
 
-void UComputerShaderBasicFunction::BlurTexture(UTextureRenderTarget2D* InTextureTarget,
+void UComputeShaderBasicFunction::BlurTexture(UTextureRenderTarget2D* InTextureTarget,
 	UTextureRenderTarget2D* OutBlurTexture, float BlurScale)
 {
 		if (InTextureTarget == nullptr || OutBlurTexture == nullptr)
@@ -183,7 +172,9 @@ void UComputerShaderBasicFunction::BlurTexture(UTextureRenderTarget2D* InTexture
 		FRDGBuilder GraphBuilder(RHICmdList);
 		{
 			
-			typename FBlurTexture::FPermutationDomain PermutationVector(0);
+			typename FBlurTexture::FPermutationDomain PermutationVector;
+			PermutationVector.Set<FBlurTexture::FBlurVector4Texture>(true);
+			
 			TShaderMapRef<FBlurTexture> ComputeShader(GetGlobalShaderMap(GMaxRHIFeatureLevel), PermutationVector);
 			
 			bool bIsShaderValid = ComputeShader.IsValid();
@@ -195,11 +186,13 @@ void UComputerShaderBasicFunction::BlurTexture(UTextureRenderTarget2D* InTexture
 				
 				FRDGTextureRef TmpTexture_BlurTexture = ConvertToUVATexture(BlurTexture, GraphBuilder);
 				FRDGTextureRef TextureTargetTexture = RegisterExternalTexture(GraphBuilder, TextureTarget->GetRenderTargetTexture(), TEXT("Input_RT"));
+				FRDGTextureRef BlurTextureTexture = RegisterExternalTexture(GraphBuilder, BlurTexture->GetRenderTargetTexture(), TEXT("Blur_RT"));
 				
 				PassParameters->T_BlurTexture = TextureTargetTexture;
 				PassParameters->RW_BlurTexture = GraphBuilder.CreateUAV(TmpTexture_BlurTexture);
 				PassParameters->Sampler	= TStaticSamplerState<SF_Bilinear>::GetRHI();
 				PassParameters->BlurScale = BlurScale;
+				
 				
 				GraphBuilder.AddPass(
 					RDG_EVENT_NAME("ExecuteExampleComputeShader"),
@@ -210,16 +203,15 @@ void UComputerShaderBasicFunction::BlurTexture(UTextureRenderTarget2D* InTexture
 						FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader, *PassParameters, GroupCount);
 					});
 				
-				FRDGTextureRef BlurTextureTexture = RegisterExternalTexture(GraphBuilder, BlurTexture->GetRenderTargetTexture(), TEXT("Connectivity_RT"));
+				
 				AddCopyTexturePass(GraphBuilder, TmpTexture_BlurTexture, BlurTextureTexture, FRHICopyTextureInfo());
 			}
 		}
 		GraphBuilder.Execute();
-
 	});
 }
 
-void UComputerShaderBasicFunction::BlurNormalTexture(UTextureRenderTarget2D* InTextureTarget,
+void UComputeShaderBasicFunction::BlurNormalTexture(UTextureRenderTarget2D* InTextureTarget,
 	UTextureRenderTarget2D* OutBlurTexture, float BlurScale)
 {
 			if (InTextureTarget == nullptr || OutBlurTexture == nullptr)
@@ -232,8 +224,21 @@ void UComputerShaderBasicFunction::BlurNormalTexture(UTextureRenderTarget2D* InT
 	{
 		FRDGBuilder GraphBuilder(RHICmdList);
 		{
+			// for (int32 PermutationId = 0; PermutationId < FBlurTexture::FPermutationDomain::PermutationCount; PermutationId++) {
+			// 	FBlurTexture::FPermutationDomain PermutationVector;
+			// 	PermutationVector.FromPermutationId(PermutationId);
+			//
+			// 	// 获取当前变体的参数状态
+			// 	bool bUseHorizontal = PermutationVector.Get<FBlurTexture::FUseHorizontalBlur>();
+			// 	bool bUseHighQuality = PermutationVector.Get<FBlurTexture::FUseHighQuality>();
+			//
+			// 	// 调度对应变体的 Shader
+			// 	TShaderMapRef<FBlurTexture> Shader(GetGlobalShaderMap(..., PermutationVector));
+			// 	DispatchComputeShader(...);
+			// }
+			typename FBlurTexture::FPermutationDomain PermutationVector;
+			PermutationVector.Set<FBlurTexture::FBlurNormalTexture>(true);
 			
-			typename FBlurTexture::FPermutationDomain PermutationVector(1);
 			TShaderMapRef<FBlurTexture> ComputeShader(GetGlobalShaderMap(GMaxRHIFeatureLevel), PermutationVector);
 			
 			bool bIsShaderValid = ComputeShader.IsValid();
@@ -269,16 +274,16 @@ void UComputerShaderBasicFunction::BlurNormalTexture(UTextureRenderTarget2D* InT
 	});
 }
 
-void UComputerShaderBasicFunction::UpPixelsMask(UTextureRenderTarget2D* InTextureTarget,
-                                                UTextureRenderTarget2D* OutUpTexture, float Threshould)
+void UComputeShaderBasicFunction::UpPixelsMask(UTextureRenderTarget2D* InTextureTarget,
+                                                UTextureRenderTarget2D* OutUpTexture, float Threshould, int32 Channel)
 {
-			if (InTextureTarget == nullptr || OutUpTexture == nullptr)
+	if (InTextureTarget == nullptr || OutUpTexture == nullptr)
 		return;
 
 	FRenderTarget* TextureTarget = InTextureTarget->GameThread_GetRenderTargetResource();
 	FRenderTarget* UpTexture = OutUpTexture->GameThread_GetRenderTargetResource();
 	ENQUEUE_RENDER_COMMAND(SceneDrawCompletion)(
-	[TextureTarget, UpTexture, Threshould](FRHICommandListImmediate& RHICmdList)
+	[=](FRHICommandListImmediate& RHICmdList)
 	{
 		FRDGBuilder GraphBuilder(RHICmdList);
 		{
@@ -295,11 +300,15 @@ void UComputerShaderBasicFunction::UpPixelsMask(UTextureRenderTarget2D* InTextur
 				
 				FRDGTextureRef TmpTexture_UpTexture = ConvertToUVATexture(UpTexture, GraphBuilder);
 				FRDGTextureRef TextureTargetTexture = RegisterExternalTexture(GraphBuilder, TextureTarget->GetRenderTargetTexture(), TEXT("Input_RT"));
+				FRDGTextureRef UpTextureTexture = RegisterExternalTexture(GraphBuilder, UpTexture->GetRenderTargetTexture(), TEXT("Connectivity_RT"));
 				
 				PassParameters->T_UpPixel = TextureTargetTexture;
 				PassParameters->RW_UpPixel = GraphBuilder.CreateUAV(TmpTexture_UpTexture);
 				PassParameters->Sampler	= TStaticSamplerState<SF_Bilinear>::GetRHI();
 				PassParameters->UpPixelThreshold = Threshould;
+				PassParameters->Channel = Channel;
+
+				AddCopyTexturePass(GraphBuilder, UpTextureTexture, TmpTexture_UpTexture, FRHICopyTextureInfo());
 				
 				GraphBuilder.AddPass(
 					RDG_EVENT_NAME("ExecuteExampleComputeShader"),
@@ -310,7 +319,6 @@ void UComputerShaderBasicFunction::UpPixelsMask(UTextureRenderTarget2D* InTextur
 						FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader, *PassParameters, GroupCount);
 					});
 				
-				FRDGTextureRef UpTextureTexture = RegisterExternalTexture(GraphBuilder, UpTexture->GetRenderTargetTexture(), TEXT("Connectivity_RT"));
 				AddCopyTexturePass(GraphBuilder, TmpTexture_UpTexture, UpTextureTexture, FRHICopyTextureInfo());
 			}
 		}

@@ -1,7 +1,7 @@
-#include "ComputerShaderCliffGenerate.h"
+#include "ComputeShaderCliffGenerate.h"
 
 #include "ClearQuad.h"
-#include "ComputerShaderGenerateHepler.h"
+#include "ComputeShaderGenerateHepler.h"
 #include "GlobalShader.h"
 #include "MaterialShader.h"
 #include "ShaderParameterStruct.h"
@@ -9,12 +9,12 @@
 #include "RenderGraphUtils.h"
 #include "RenderGraphBuilder.h"
 #include "RenderTargetPool.h"
-#include "ComputerShaderGenerateHepler.h"
+#include "ComputeShaderGenerateHepler.h"
 #include "EngineUtils.h"
 #include "Components/SceneCaptureComponent2D.h"
 #include "Engine/StaticMeshActor.h"
 #include "Kismet/KismetRenderingLibrary.h"
-#include "ComputerShaderGeneral.h"
+#include "ComputeShaderGeneral.h"
 
 DECLARE_STATS_GROUP(TEXT("CSCliffGenerate"), STATGROUP_CSCliffGenerate, STATCAT_Advanced);
 DECLARE_CYCLE_STAT(TEXT("CS Execute"), STAT_CSCliffGenerate_Execute, STATGROUP_CSCliffGenerate)
@@ -72,10 +72,13 @@ public:
 		OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_X"), NUM_THREADS_PER_GROUP_DIMENSION_X);
 		OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_Y"), NUM_THREADS_PER_GROUP_DIMENSION_Y);
 		OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_Z"), NUM_THREADS_PER_GROUP_DIMENSION_Z);
+		
 	}
 };
 
-void UComputerShaderCliffGenerateFunctions::CSCliffGenerate(ACSGenerateCaptureScene* Capturer, UStaticMesh* StaticMesh,
+
+
+void UComputeShaderCliffGenerateFunctions::CSCliffGenerate(ACSGenerateCaptureScene* Capturer, UStaticMesh* StaticMesh,
 	UTextureRenderTarget2D* DubugView, UTextureRenderTarget2D* Result, UTexture2D* TMeshDepth, float SpawnSize,
 	float TestSizeScale, FName Tag)
 {

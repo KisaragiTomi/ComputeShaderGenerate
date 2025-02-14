@@ -7,7 +7,7 @@
 #include "RenderGraphUtils.h"
 #include "RenderGraphBuilder.h"
 #include "RenderTargetPool.h"
-#include "ComputerShaderGenerateHepler.h"
+#include "ComputeShaderGenerateHepler.h"
 #include "EngineUtils.h"
 
 
@@ -67,6 +67,16 @@ IMPLEMENT_GLOBAL_SHADER(FCalculateGradient, "/OoOShaders/BasicFunction.usf", "Ca
 class FConnectivityPixel : public FGlobalShader
 {
 public:
+	enum class EConnectivityStep : uint8
+	{
+		CP_Init,
+		CP_FindIslands,
+		CP_Count,
+		CP_DrawTexture,
+		MAX
+	};
+	class FConnectivityPiexlStep : SHADER_PERMUTATION_ENUM_CLASS("CONNECTIVITYSTEP", EConnectivityStep);
+	using FPermutationDomain = TShaderPermutationDomain<FConnectivityPiexlStep>;
 	//Declare this class as a global shader
 	DECLARE_GLOBAL_SHADER(FConnectivityPixel);
 	//Tells the engine that this shader uses a structure for its parameters
@@ -74,10 +84,11 @@ public:
 	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
 		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, InputTexture)
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, RW_ConnectivityPixel)
-		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<uint>, RW_LabelBufferA)
-		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<uint>, RW_LabelBufferB)
-		SHADER_PARAMETER_UAV(RWBuffer<uint>, RW_LabelCounters)
-		SHADER_PARAMETER(int, Step)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, RW_DebugView)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, RW_LabelBufferA)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, RW_LabelBufferB)
+		SHADER_PARAMETER(int, Channel)
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWBuffer<uint>, RW_LabelCounters)
 
 		SHADER_PARAMETER_SAMPLER(SamplerState, Sampler)
 	END_SHADER_PARAMETER_STRUCT()
@@ -85,8 +96,6 @@ public:
 	//Called by the engine to determine which permutations to compile for this shader
 	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
 	{
-		
-
 		return true;
 	}
 	//Modifies the compilations environment of the shader
@@ -100,23 +109,6 @@ public:
 		OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_X"), NUM_THREADS_PER_GROUP_DIMENSION_X);
 		OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_Y"), NUM_THREADS_PER_GROUP_DIMENSION_Y);
 		OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_Z"), NUM_THREADS_PER_GROUP_DIMENSION_Z);
-
-		if (Parameters.PermutationId == 0)
-		{
-			OutEnvironment.SetDefine(TEXT("ENTRY_FUNCTION"), TEXT("CP_Init"));
-		}
-		if (Parameters.PermutationId == 1)
-		{
-			OutEnvironment.SetDefine(TEXT("ENTRY_FUNCTION"), TEXT("CP_FindIslands"));
-		}
-		if (Parameters.PermutationId == 2)
-		{
-			OutEnvironment.SetDefine(TEXT("ENTRY_FUNCTION"), TEXT("CP_Count"));
-		}
-		if (Parameters.PermutationId == 3)
-		{
-			OutEnvironment.SetDefine(TEXT("ENTRY_FUNCTION"), TEXT("CP_DrawTexture"));
-		}
 	}
 };
 
@@ -126,6 +118,11 @@ IMPLEMENT_GLOBAL_SHADER(FConnectivityPixel, "/OoOShaders/Connectivity.usf", "Con
 class FBlurTexture : public FGlobalShader
 {
 public:
+
+	class FBlurVector4Texture : SHADER_PERMUTATION_BOOL("USE_BLURVECTOR4TEXTUR");
+	class FBlurNormalTexture : SHADER_PERMUTATION_BOOL("USE_BLURNORMALTEXTURE");
+
+	using FPermutationDomain = TShaderPermutationDomain<FBlurVector4Texture, FBlurNormalTexture>;
 	//Declare this class as a global shader
 	DECLARE_GLOBAL_SHADER(FBlurTexture);
 	//Tells the engine that this shader uses a structure for its parameters
@@ -141,7 +138,7 @@ public:
 	//Called by the engine to determine which permutations to compile for this shader
 	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
 	{
-		
+		FPermutationDomain PermutationVector(Parameters.PermutationId);
 		return true;
 	}
 	//Modifies the compilations environment of the shader
@@ -156,14 +153,14 @@ public:
 		OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_Y"), NUM_THREADS_PER_GROUP_DIMENSION_Y);
 		OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_Z"), NUM_THREADS_PER_GROUP_DIMENSION_Z);
 		
-		if (Parameters.PermutationId == 0)
-		{
-			OutEnvironment.SetDefine(TEXT("ENTRY_FUNCTION"), TEXT("BT_Vector4"));
-		}
-		if (Parameters.PermutationId == 1)
-		{
-			OutEnvironment.SetDefine(TEXT("ENTRY_FUNCTION"), TEXT("BT_Normal"));
-		}
+		// if (Parameters.PermutationId == 0)
+		// {
+		// 	OutEnvironment.SetDefine(TEXT("ENTRY_FUNCTION"), TEXT("BT_Vector4"));
+		// }
+		// if (Parameters.PermutationId == 1)
+		// {
+		// 	OutEnvironment.SetDefine(TEXT("ENTRY_FUNCTION"), TEXT("BT_Normal"));
+		// }
 	}
 };
 
@@ -180,6 +177,7 @@ public:
 		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, T_UpPixel)
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, RW_UpPixel)
 		SHADER_PARAMETER(float, UpPixelThreshold)
+		SHADER_PARAMETER(int, Channel)
 
 		SHADER_PARAMETER_SAMPLER(SamplerState, Sampler)
 	END_SHADER_PARAMETER_STRUCT()

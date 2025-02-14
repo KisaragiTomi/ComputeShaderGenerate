@@ -4,7 +4,7 @@
 #include "GenericPlatform/GenericPlatformMisc.h"
 #include "Kismet/BlueprintAsyncActionBase.h"
 #include "Engine/TextureRenderTarget2D.h"
-#include "ComputerShaderGenerateHepler.h"
+#include "ComputeShaderGenerateHepler.h"
 //
 #include "DrawHOLDTexture.generated.h"
 //
@@ -28,7 +28,7 @@ struct OOOCOMPUTESHADER_API FDRawHLODTextureCSParameters
 	}
 };
 //
-// namespace ComputerShaderFunc
+// namespace ComputeShaderFunc
 // {
 // 	void OoOCS(FRDGBuilder GraphBuilder, FOoOCSParameters Params);
 // }

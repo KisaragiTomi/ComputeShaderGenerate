@@ -1,7 +1,7 @@
-#include "ComputerShaderSceneCapture.h"
+#include "ComputeShaderSceneCapture.h"
 
 #include "ClearQuad.h"
-#include "ComputerShaderGenerateHepler.h"
+#include "ComputeShaderGenerateHepler.h"
 #include "GlobalShader.h"
 #include "MaterialShader.h"
 #include "ShaderParameterStruct.h"
@@ -9,12 +9,12 @@
 #include "RenderGraphUtils.h"
 #include "RenderGraphBuilder.h"
 #include "RenderTargetPool.h"
-#include "ComputerShaderGenerateHepler.h"
+#include "ComputeShaderGenerateHepler.h"
 #include "EngineUtils.h"
 #include "Components/SceneCaptureComponent2D.h"
 #include "Engine/StaticMeshActor.h"
 #include "Kismet/KismetRenderingLibrary.h"
-#include "ComputerShaderGeneral.h"
+#include "ComputeShaderGeneral.h"
 
 ACSGenerateCaptureScene::ACSGenerateCaptureScene()
 {
