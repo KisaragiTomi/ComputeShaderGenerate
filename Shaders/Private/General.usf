@@ -5,7 +5,7 @@
 
 // 1D 随机数生成
 float Random1D(float value) {
-    return frac(sin(value + b) * a);
+    return frac(sin(dot(value , 186125.1255645) * 15677.12154));
 }
 
 // 2D 随机数生成
@@ -34,6 +34,7 @@ float4 Random4D(float4 value) {
     );
 }
 
+
 float2 ScaleUV(float2 UV, float2 Scale)
 {
     float2x2 ScaleMat = float2x2(
@@ -41,6 +42,20 @@ float2 ScaleUV(float2 UV, float2 Scale)
         0, Scale.y
     );
     return mul(UV, ScaleMat);
+}
+
+float2 RotUVCenter(float2 UV, float Angle, float2 Cener = 0.5)
+{
+    UV -= Cener;
+    float SinRot = sin(Angle);
+    float CosRot = cos(Angle);
+    float2x2 RotMat = float2x2(
+        CosRot, -SinRot,
+        SinRot, CosRot
+    );
+    UV = mul(UV, RotMat);
+    UV += Cener;
+    return UV;
 }
 
 float2 RotUV(float2 UV, float Angle)
@@ -117,56 +132,6 @@ float4 ComputeGradientT(SamplerState Sampler, Texture2D GrayTexture, float2 uv)
     return float4(Gradient, GradientLength, 0); // 梯度向量
 }
 
-float4 BlurPixel(SamplerState Sampler, Texture2D BlurTexture, float2 uv)
-{
-    float Gx = 0;
-    float Gy = 0;
-    float4 SumSampleValue = float4(0, 0, 0, 0);
-    float MaxCell = 0;
-    BlurTexture.GetDimensions(MaxCell, MaxCell);
-    
-    for (int i = -1; i <= 1; i++)
-    {
-        for (int j = -1; j <= 1; j++)
-        {
-            float2 offset = float2(i, j) / MaxCell; 
-            float4 SampleValue = BlurTexture.SampleLevel(Sampler, uv + offset, 0);
-            SumSampleValue += SampleValue;
-        }
-    }
-    SumSampleValue /= 9.0; 
-    
-    return SumSampleValue; 
-}
-float4 BlurNormalPixel(SamplerState Sampler, Texture2D BlurTexture, float2 uv)
-{
-    float Gx = 0;
-    float Gy = 0;
-    float4 SumSampleValue = float4(0, 0, 0, 0);
-    float MaxCell = 0;
-    BlurTexture.GetDimensions(MaxCell, MaxCell);
-    
-    for (int i = -1; i <= 1; i++)
-    {
-        for (int j = -1; j <= 1; j++)
-        {
-            float2 offset = float2(i, j) / MaxCell; 
-            float4 SampleValue = BlurTexture.SampleLevel(Sampler, uv + offset, 0);
-            SumSampleValue += SampleValue;
-        }
-    }
-    SumSampleValue /= 9.0; 
-    if (length(SumSampleValue) > 0.001)
-    {
-        SumSampleValue.xyz = normalize(SumSampleValue.xyz);
-    }
-    else
-    {
-        SumSampleValue.xyz = 0;
-    }
-    return SumSampleValue; 
-}
-
 
 float2 CalculateGrayGradientT(Texture2D Texture2D, uint3 DispatchThreadId)
 {
@@ -193,68 +158,35 @@ float2 CalculateGrayGradientT(Texture2D Texture2D, uint3 DispatchThreadId)
     return gradient;
 }
 
-float2 CalculateGrayGradientRWT(RWTexture2D<float> RWTexture2D, uint3 DispatchThreadId)
-{
-    uint width, height;
-    RWTexture2D.GetDimensions(width, height);
-    float2 gradient = float2(0.0f, 0.0f);
+float4 SampleBilinear(RWTexture2D<float4> _SourceTexture, uint _SourceTextureSize, float2 uv) {
+    // 计算四个相邻像素的坐标
+    float2 coord = uv - 0.5;  // 修正偏移以对齐像素中心
+    int2 x0y0 = floor(coord);
+    int2 x1y0 = x0y0 + int2(1, 0);
+    int2 x0y1 = x0y0 + int2(0, 1);
+    int2 x1y1 = x0y0 + int2(1, 1);
 
-    float color = RWTexture2D[clamp(DispatchThreadId.xy, uint2(0, 0), uint2(width, height))];
-    
-    float upcolor = RWTexture2D[clamp(DispatchThreadId.xy + (0,1), uint2(0, 0), uint2(width, height))];
-    gradient += float2(0,1) * ((upcolor) - (color));
-    float downcolor = RWTexture2D[clamp(DispatchThreadId.xy + (0,-1), uint2(0, 0), uint2(width, height))];
-    gradient += float2(0,-1) * ((downcolor) - (color));
-    float leftcolor = RWTexture2D[clamp(DispatchThreadId.xy + (-1,0), uint2(0, 0), uint2(width, height))];
-    gradient += float2(-1,0) * ((leftcolor) - (color));
-    float rightcolor = RWTexture2D[clamp(DispatchThreadId.xy + (0,1), uint2(0, 0), uint2(width, height))];
-    gradient += float2(1,0) * ((rightcolor) - (color));
+    // 边界保护
+    x0y0 = clamp(x0y0, int2(0, 0), _SourceTextureSize - 1);
+    x1y0 = clamp(x1y0, int2(0, 0), _SourceTextureSize - 1);
+    x0y1 = clamp(x0y1, int2(0, 0), _SourceTextureSize - 1);
+    x1y1 = clamp(x1y1, int2(0, 0), _SourceTextureSize - 1);
 
-    gradient = normalize(gradient);
-    
-    return gradient;
+    // 采样四个像素
+    float4 p00 = _SourceTexture.Load(int3(x0y0, 0));
+    float4 p10 = _SourceTexture.Load(int3(x1y0, 0));
+    float4 p01 = _SourceTexture.Load(int3(x0y1, 0));
+    float4 p11 = _SourceTexture.Load(int3(x1y1, 0));
+
+    // 计算插值权重
+    float2 weight = frac(coord);
+    float w00 = (1 - weight.x) * (1 - weight.y);
+    float w10 = weight.x * (1 - weight.y);
+    float w01 = (1 - weight.x) * weight.y;
+    float w11 = weight.x * weight.y;
+
+    // 混合结果
+    return w00 * p00 + w10 * p10 + w01 * p01 + w11 * p11;
 }
 
-float2 CalculateGrayGradientRWT(RWTexture2D<float4> RWTexture2D, uint3 DispatchThreadId)
-{
-    uint width, height;
-    RWTexture2D.GetDimensions(width, height);
-    float2 gradient = float2(0.0f, 0.0f);
 
-    float4 color = RWTexture2D[clamp(DispatchThreadId.xy, uint2(0, 0), uint2(width, height))];
-    
-    float4 upcolor = RWTexture2D[clamp(DispatchThreadId.xy + (0,1), uint2(0, 0), uint2(width, height))];
-    gradient += float2(0,1) * (ColorToGray(upcolor) - ColorToGray(color));
-    float4 downcolor = RWTexture2D[clamp(DispatchThreadId.xy + (0,-1), uint2(0, 0), uint2(width, height))];
-    gradient += float2(0,-1) * (ColorToGray(downcolor) - ColorToGray(color));
-    float4 leftcolor = RWTexture2D[clamp(DispatchThreadId.xy + (-1,0), uint2(0, 0), uint2(width, height))];
-    gradient += float2(-1,0) * (ColorToGray(leftcolor) - ColorToGray(color));
-    float4 rightcolor = RWTexture2D[clamp(DispatchThreadId.xy + (0,1), uint2(0, 0), uint2(width, height))];
-    gradient += float2(1,0) * (ColorToGray(rightcolor) - ColorToGray(color));
-
-    gradient = normalize(gradient);
-    
-    return gradient;
-}
-
-float2 CalculateGrayGradientRWT(RWTexture2D<float3> RWTexture2D, uint3 DispatchThreadId)
-{
-    uint width, height;
-    RWTexture2D.GetDimensions(width, height);
-    float2 gradient = float2(0.0f, 0.0f);
-
-    float3 color = RWTexture2D[clamp(DispatchThreadId.xy, uint2(0, 0), uint2(width, height))];
-    
-    float3 upcolor = RWTexture2D[clamp(DispatchThreadId.xy + (0,1), uint2(0, 0), uint2(width, height))];
-    gradient += float2(0,1) * (ColorToGray(upcolor) - ColorToGray(color));
-    float3 downcolor = RWTexture2D[clamp(DispatchThreadId.xy + (0,-1), uint2(0, 0), uint2(width, height))];
-    gradient += float2(0,-1) * (ColorToGray(downcolor) - ColorToGray(color));
-    float3 leftcolor = RWTexture2D[clamp(DispatchThreadId.xy + (-1,0), uint2(0, 0), uint2(width, height))];
-    gradient += float2(-1,0) * (ColorToGray(leftcolor) - ColorToGray(color));
-    float3 rightcolor = RWTexture2D[clamp(DispatchThreadId.xy + (0,1), uint2(0, 0), uint2(width, height))];
-    gradient += float2(1,0) * (ColorToGray(rightcolor) - ColorToGray(color));
-
-    gradient = normalize(gradient);
-    
-    return gradient;
-}

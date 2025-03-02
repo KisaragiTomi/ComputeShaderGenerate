@@ -3,10 +3,21 @@
 #include "/Engine/Public/Platform.ush"
 #include "General.usf"
 
+#ifndef THREADGROUPSIZE_X
+#define THREADGROUPSIZE_X 32
+#endif
+
+#ifndef THREADGROUPSIZE_Y
+#define THREADGROUPSIZE_Y 32
+#endif
+
+
 SamplerState Sampler;
 
 Texture2D T_Height;
 RWTexture2D<float4> RW_Gradient;
+
+
 
 [numthreads(THREADGROUPSIZE_X, THREADGROUPSIZE_Y, THREADGROUPSIZE_Z)]
 void CalculateGradient(
@@ -25,21 +36,172 @@ Texture2D T_BlurTexture;
 RWTexture2D<float4> RW_BlurTexture;
 float BlurScale;
 
+#ifndef BT_SHAREFIND
+#define BT_SHAREFIND 1
+#endif
+
+groupshared half3 shareBlur[THREADGROUPSIZE_X + BT_SHAREFIND * 2][THREADGROUPSIZE_Y + BT_SHAREFIND * 2];
+
+float4 BlurPixel(SamplerState Sampler, Texture2D BlurTexture, uint3 DispatchThreadId, uint3 GroupThreadId, uint GroupIndex)
+{
+  
+    float MaxCell;
+    BlurTexture.GetDimensions(MaxCell, MaxCell);
+    MaxCell -= 1;
+    
+    uint PixelBoundSize = BT_SHAREFIND;
+    int2 globalPos = DispatchThreadId.xy;
+
+    // 加载主区域到共享内存
+    shareBlur[GroupThreadId.x + PixelBoundSize][GroupThreadId.y + PixelBoundSize] = BlurTexture[DispatchThreadId.xy].xyz;
+ 
+    // 左边缘
+    if (GroupThreadId.x < PixelBoundSize)
+    {
+        int2 pos = globalPos - int2(PixelBoundSize, 0);
+        shareBlur[GroupThreadId.x][GroupThreadId.y + PixelBoundSize] = BlurTexture[clamp(pos, int2(0,0), MaxCell)].xyz;
+    }
+    // 右边缘
+    if (GroupThreadId.x >= THREADGROUPSIZE_X - PixelBoundSize)
+    {
+        int2 pos = globalPos + int2(PixelBoundSize, 0);
+        shareBlur[GroupThreadId.x + PixelBoundSize * 2][GroupThreadId.y + PixelBoundSize] = BlurTexture[clamp(pos, int2(0,0), MaxCell)].xyz;
+    }
+    // 上边缘
+    if (GroupThreadId.y < PixelBoundSize)
+    {
+        int2 pos = globalPos - int2(0, PixelBoundSize);
+        shareBlur[GroupThreadId.x + PixelBoundSize][GroupThreadId.y] = BlurTexture[clamp(pos, int2(0,0), MaxCell)].xyz;
+    }
+    // 下边缘
+    if (GroupThreadId.y >= THREADGROUPSIZE_X - PixelBoundSize)
+    {
+        int2 pos = globalPos + int2(0, PixelBoundSize);
+        shareBlur[GroupThreadId.x + PixelBoundSize][GroupThreadId.y + PixelBoundSize * 2] = BlurTexture[clamp(pos, int2(0,0), MaxCell)].xyz;
+    }
+	
+	if (GroupThreadId.x < PixelBoundSize && GroupThreadId.y < PixelBoundSize)
+	{
+		int2 pos = globalPos + int2(-PixelBoundSize, -PixelBoundSize);
+		shareBlur[GroupThreadId.x][GroupThreadId.y] = BlurTexture[clamp(pos, int2(0,0), MaxCell)].xyz;
+	}
+	if (GroupThreadId.x < PixelBoundSize && GroupThreadId.y >= THREADGROUPSIZE_X - PixelBoundSize)
+	{
+		int2 pos = globalPos + int2(-PixelBoundSize, PixelBoundSize);
+		shareBlur[GroupThreadId.x][GroupThreadId.y + PixelBoundSize * 2] = BlurTexture[clamp(pos, int2(0,0), MaxCell)].xyz;
+	}
+	if (GroupThreadId.x >= THREADGROUPSIZE_X - PixelBoundSize && GroupThreadId.y >= THREADGROUPSIZE_X - PixelBoundSize)
+	{
+		int2 pos = globalPos + int2(PixelBoundSize, PixelBoundSize);
+		shareBlur[GroupThreadId.x + PixelBoundSize * 2][GroupThreadId.y + PixelBoundSize * 2] = BlurTexture[clamp(pos, int2(0,0), MaxCell)].xyz;
+	}
+	if (GroupThreadId.x >= THREADGROUPSIZE_X - PixelBoundSize && GroupThreadId.y < PixelBoundSize)
+	{
+		int2 pos = globalPos + int2(PixelBoundSize, -PixelBoundSize);
+		shareBlur[GroupThreadId.x + PixelBoundSize * 2][GroupThreadId.y] = BlurTexture[clamp(pos, int2(0,0), MaxCell)].xyz;
+	}
+    
+	
+    // 同步线程
+    GroupMemoryBarrierWithGroupSync();
+
+    // 计算模糊（从共享内存读取）
+	float4 sum = 0;
+	for (int dy = -BT_SHAREFIND; dy <= BT_SHAREFIND; ++dy) 
+	{
+		for (int dx = -BT_SHAREFIND; dx <= BT_SHAREFIND; ++dx)
+		{
+			sum += float4(shareBlur[GroupThreadId.x + PixelBoundSize + dx][GroupThreadId.y + PixelBoundSize + dy], 0);
+		}
+	}
+	float4 result = sum / (float)((2*PixelBoundSize+1)*(2*PixelBoundSize+1));
+    return result; 
+}
+
+
+float4 BlurPixelOrig(SamplerState Sampler, Texture2D BlurTexture, float2 uv)
+{
+	float Gx = 0;
+	float Gy = 0;
+	float4 SumSampleValue = float4(0, 0, 0, 0);
+	float MaxCell = 0;
+	BlurTexture.GetDimensions(MaxCell, MaxCell);
+    
+	for (int i = -1; i <= 1; i++)
+	{
+		for (int j = -1; j <= 1; j++)
+		{
+			float2 offset = float2(i, j) / MaxCell; 
+			float4 SampleValue = BlurTexture.SampleLevel(Sampler, uv + offset, 0);
+			SumSampleValue += SampleValue;
+		}
+	}
+	SumSampleValue /= 9.0; 
+	return SumSampleValue; 
+}
+
+float4 BlurNormalPixel(SamplerState Sampler, Texture2D BlurTexture, float2 uv)
+{
+    float Gx = 0;
+    float Gy = 0;
+    float4 SumSampleValue = float4(0, 0, 0, 0);
+    float MaxCell = 0;
+    BlurTexture.GetDimensions(MaxCell, MaxCell);
+    
+    for (int i = -1; i <= 1; i++)
+    {
+        for (int j = -1; j <= 1; j++)
+        {
+            float2 offset = float2(i, j) / MaxCell; 
+            float4 SampleValue = BlurTexture.SampleLevel(Sampler, uv + offset, 0);
+            SumSampleValue += SampleValue;
+        }
+    }
+    SumSampleValue /= 9.0; 
+    if (length(SumSampleValue) > 0.001)
+    {
+        SumSampleValue.xyz = normalize(SumSampleValue.xyz);
+    }
+    else
+    {
+        SumSampleValue.xyz = 0;
+    }
+    return SumSampleValue; 
+}
+
 [numthreads(THREADGROUPSIZE_X, THREADGROUPSIZE_Y, THREADGROUPSIZE_Z)]
 void BlurTexture(
 					   uint3 DispatchThreadId : SV_DispatchThreadID,
+					   uint3 GroupThreadId : SV_GroupThreadID,
 					   uint GroupIndex : SV_GroupIndex)
 {
 	float MaxCell = 0;
 	T_BlurTexture.GetDimensions(MaxCell, MaxCell);
 	float2 uv = DispatchThreadId.xy / (MaxCell - 1);
 	float4 BlurColor = float4(0, 0, 0, 0);
-#if USE_BLURVECTOR4TEXTUR
-	BlurColor = BlurPixel(Sampler, T_BlurTexture, uv);
-#elif USE_BLURNORMALTEXTURE
+	// for (int i = 0; i < 15000; i++)
+	// {
+#if BLURTEXTURE_BT_BLUR3X3
+	BlurColor = BlurPixel(Sampler, T_BlurTexture, DispatchThreadId, GroupThreadId, GroupIndex);
+#elif BLURTEXTURE_BT_BLUR7X7
+	BlurColor = BlurPixel(Sampler, T_BlurTexture, DispatchThreadId, GroupThreadId, GroupIndex);
+#elif BLURTEXTURE_BT_BLUR9X9
+	BlurColor = BlurPixel(Sampler, T_BlurTexture, DispatchThreadId, GroupThreadId, GroupIndex);
+#elif BLURTEXTURE_BT_BLUR15X15
+	BlurColor = BlurPixel(Sampler, T_BlurTexture, DispatchThreadId, GroupThreadId, GroupIndex);
+#elif BLURTEXTURE_BT_BLURNORMAL3X3
+	
 	BlurColor = BlurNormalPixel(Sampler, T_BlurTexture, uv);
+#elif BLURTEXTURE_BT_BLURNORMAL7X7
+	
+#elif BLURTEXTURE_BT_BLURNORMAL9X9
+	
+#elif BLURTEXTURE_BT_BLURNORMAL15X15
+	
 #endif
-	BlurColor = lerp(T_BlurTexture[DispatchThreadId.xy], BlurColor, BlurScale);
+	// }
+	//BlurColor = T_BlurTexture[DispatchThreadId.xy];
+	// BlurColor = lerp(T_BlurTexture[DispatchThreadId.xy], BlurColor, BlurScale);
 	RW_BlurTexture[DispatchThreadId.xy] = BlurColor;
 }
 
@@ -58,4 +220,35 @@ void UpPixel(
 	
 	RW_UpPixel[DispatchThreadId.xy][Channel] = float(dotvalue > UpPixelThreshold);
   
+}
+
+Texture2D T_ProcssTexture;
+Texture2DArray<float4> TA_ProcssTexture;
+RWTexture2D<float4> RW_ProcssTexture;
+// RWTexture2D<float4> RW_DebugView;
+float InputData;
+
+void ProcessHeightTexture(uint3 DispatchThreadId)
+{
+	RW_ProcssTexture[DispatchThreadId.xy].x = min(InputData - T_ProcssTexture[DispatchThreadId.xy].x, InputData);
+	// RW_ProcssTexture[DispatchThreadId.xy] = 1;
+}
+
+void TextureArrayTest(uint3 DispatchThreadId)
+{
+	
+	RW_ProcssTexture[DispatchThreadId.xy].x = TA_ProcssTexture[DispatchThreadId];
+}
+
+[numthreads(THREADGROUPSIZE_X, THREADGROUPSIZE_Y, THREADGROUPSIZE_Z)]
+void TempFunction(
+					   uint3 DispatchThreadId : SV_DispatchThreadID,
+					   uint GroupIndex : SV_GroupIndex)
+{
+#if GTS_PROCESSMESHHEIGHTTEXTURE
+	ProcessHeightTexture(DispatchThreadId);
+#elif GTS_TEXTUREARRAYTEST
+	TextureArrayTest(DispatchThreadId);
+#endif
+	
 }

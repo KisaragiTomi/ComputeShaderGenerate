@@ -1,36 +1,85 @@
 #include "/Engine/Public/Platform.ush"
 #include "General.usf"
 
+#ifndef MAX_HEIGHT
+#define MAX_HEIGHT 10000
+#endif
+
+#ifndef THREADGROUPSIZE_X
+#define THREADGROUPSIZE_X 256
+#endif
+
+#ifndef THREADGROUPSIZE_Y
+#define THREADGROUPSIZE_Y 1
+#endif
+
+#ifndef SHAREFIND
+#define SHAREFIND 1
+#endif
+
+#ifndef EXTENTGENERATEMASK
+#define EXTENTGENERATEMASK 2
+#endif
+
+float HeightOffset;
 float RandomRotator;
 float Size;
+int SelectIndex;
 
+
+Texture2D T_FilterResult;
+Texture2D T_CurrentSceneDepth;//T_CurrentSceneDepth   .x = SceneDepth .y = ungeneratemask .z = generatemask
 Texture2D T_SceneDepth;
 Texture2D T_TMeshDepth;
+Texture2D T_TMeshDepth2;
 Texture2D T_SceneNormal;
-Texture2D T_CurrentSceneDepth;
-Texture2D T_Height;
+Texture2D T_ObjectNormal;
+Texture2D T_TargetHeight;
+Texture2D T_ObjectDepth;
 Texture2D T_Result;
+Texture2DArray<float4> TA_MeshHeight;
 RWTexture2D<float4> RW_CurrentSceneDepth;
+RWTexture2D<float4> RW_CurrentSceneDepthA;
+RWTexture2D<float4> RW_CurrentSceneDepthB;
+RWTexture2D<float4> RW_TargetHeight;
 RWTexture2D<float4> RW_DebugView;
 RWTexture2D<float4> RW_Result;
-RWTexture2D<float4> RW_Gradient;
+RWTexture2D<float4> RW_ResultA;
+RWTexture2D<float4> RW_ResultB;
+RWTexture2D<float4> RW_FilterResult;// .x = HeightTestCount, .y = Size / 2, .z = NumberX, .w = NumberY;
+RWTexture2D<float4> RW_SaveRotateScale;
+RWTexture2D<float4> RW_FilterResulteMult;
+
+RWTexture2D<float4> RW_TempA;
+RWTexture2D<float4> RW_TempB;
+RWTexture2D<float4> RW_Deduplication;
+RWBuffer<float4> RW_FindPixelBuffer;
+RWBuffer<uint2> RW_FindPixelBufferResult_Number;
+RWBuffer<uint> RW_FindPixelBufferResult_NumberCount;
+// float VerticalHeight;
+
 
 SamplerState Sampler;
 
-
+static const uint2 NeighbourOffset[4] = {
+    uint2(0, 1),   
+    uint2(0, -1), 
+    uint2(-1, 0), 
+    uint2(1, 0)   
+};
 
 [numthreads(THREADGROUPSIZE_X, THREADGROUPSIZE_Y, THREADGROUPSIZE_Z)]
 void MainComputeShader(
                        uint3 DispatchThreadId : SV_DispatchThreadID,
-	                   uint GroupIndex : SV_GroupIndex) 
+	                   uint GroupId : SV_GroupIndex) 
 {
-    float MaxHeight = 10000;
+ 
     float MaxCell;
     
     T_SceneDepth.GetDimensions(MaxCell, MaxCell);
     float2 UV = DispatchThreadId.xy / MaxCell;
     float4 RootSceneColor = T_SceneDepth[DispatchThreadId.xy];
-    RootSceneColor.x = MaxHeight - RootSceneColor.x;
+    float RootSceneHeight =  MAX_HEIGHT - RootSceneColor.x;
  
     bool OutSpawn = true;
     float MaxIndex = 10;
@@ -52,7 +101,7 @@ void MainComputeShader(
 		    MeshUV = RotUV(UV, PI2);
 		    MeshUV += .5;
             float4 MeshHeight = T_TMeshDepth.SampleLevel(Sampler, MeshUV, 0);
-            MeshHeight.x = MaxHeight - MeshHeight.x;
+            MeshHeight.x =  MAX_HEIGHT - MeshHeight.x;
             float2 TestUV = float2(UV.x + (X - MaxIndex/2) * MeshStep, UV.y + (Y - MaxIndex/2) * MeshStep);
 		    TestUV -= UV;
             TestUV = RotUV(TestUV, RandomRotator * PI2);
@@ -66,8 +115,8 @@ void MainComputeShader(
             
             //float4 SceneColor = float4(0, 0, 0, 0);
             float4 SceneColor = T_SceneDepth.SampleLevel(Sampler, TestUV, 0);
-            SceneHight = MaxHeight - SceneColor.x;
-            if(RootSceneColor.x + MeshHeight.x < SceneHight || RootSceneColor.x > SceneHight || SceneColor.y > 0)
+            SceneHight =  MAX_HEIGHT - SceneColor.x;
+            if(RootSceneHeight + MeshHeight.x < SceneHight || RootSceneHeight > SceneHight || SceneColor.y > 0)
             {
                 //Grid2D.SetVector4Value<Attribute="Rotation">(IndexX, IndexY, float4(0, 0, 0, 0));
                 OutSpawn = false;
@@ -91,160 +140,806 @@ void MainComputeShader(
     //OutSpawn = false;
     if(OutSpawn)
     {
-        // Grid2D.SetVector4Value<Attribute="Rotation">(IndexX, IndexY, float4(0, 0, 0, 1));
-        // Grid2DSelect.SetVector2Value<Attribute="Select">(0, 0, float2(IndexX, IndexY));
-        // Grid2DSelect.SetVector2Value<Attribute="Select">(1, 0, float2(1, 0));
-        SceneHight = MaxHeight - (T_SceneDepth.SampleLevel(Sampler, UV, 0)).x;
-        RW_Result[int2(0, 0)] = float4(UV.x, UV.y, SceneHight / MaxHeight, RandomRotator);
-        //RW_Result[int2(1, 0)] = float4(RandomRotator, 0, 0, 0);
+        SceneHight =  MAX_HEIGHT - (T_SceneDepth.SampleLevel(Sampler, UV, 0)).x;
+        RW_Result[int2(0, 0)] = float4(UV.x, UV.y, SceneHight /  MAX_HEIGHT, RandomRotator);
     }
     //RW_Result[int2(0, 0)] = float4(1.0f, 0.0f, 0.0f, 0.0f);
 
 }
 
-[numthreads(THREADGROUPSIZE_X, THREADGROUPSIZE_Y, THREADGROUPSIZE_Z)]
-void MeshFillMult(
-                       uint3 DispatchThreadId : SV_DispatchThreadID,
-	                   uint GroupIndex : SV_GroupIndex) 
+
+
+void MeshFillGeneral(int3 DispatchThreadId)
 {
-    float MaxHeight = 10000;
+    float MaxCell;
+    T_CurrentSceneDepth.GetDimensions(MaxCell, MaxCell);
+    MaxCell -= 1;
+    float2 UV = DispatchThreadId.xy / (MaxCell - 1);
+    
+ 
     uint2 MaxResult = 0;
     T_Result.GetDimensions(MaxResult.x, MaxResult.y);
     float4 ResultIndex = T_Result[uint2(MaxResult.x - 1, MaxResult.y - 1)];
     
     //I need sample currentSceneDepth, so cant ues UAV
-    float MaxCell;
-    T_CurrentSceneDepth.GetDimensions(MaxCell, MaxCell);
-    MaxCell -= 1;
-    float2 UV = DispatchThreadId.xy / (MaxCell - 1);
+
     float4 RootSceneColor = T_CurrentSceneDepth[DispatchThreadId.xy];
-    
-    RootSceneColor.x = MaxHeight - RootSceneColor.x;
-    //Grid2D.SetVector4Value<Attribute="Rotation">(IndexX, IndexY, float4(0, 0, 0, 0));
-    
-    bool OutSpawn = true;
+    float RootSceneHeight =  MAX_HEIGHT - RootSceneColor.x;
+
     float MaxIndex = 10;
     float MeshStep = Size / MaxIndex;
     float SceneHight = 0;
     for(float X = 0; X < MaxIndex; X++)
     {
-        if(OutSpawn == false)
-        {
-            break;
-        }
         for(float Y = 0; Y < MaxIndex; Y++)
         {
-            
+            //Sample Mesh Height
             float2 MeshUV = float2(X / MaxIndex, Y / MaxIndex);
-		    MeshUV -= .5;
-		    MeshUV = RotUV(MeshUV, PI2);
-		    MeshUV += .5;
-            float4 MeshHeight = T_TMeshDepth.SampleLevel(Sampler, MeshUV, 0);
-            MeshHeight.x = MaxHeight - MeshHeight.x;
+            MeshUV = RotUVCenter(MeshUV, RandomRotator * PI2);
+
+            //Sample Scene Height
             float2 TestUV = float2(UV.x + (X - MaxIndex/2) * MeshStep, UV.y + (Y - MaxIndex/2) * MeshStep);
-		    TestUV -= UV;
-            TestUV = RotUV(TestUV, RandomRotator * PI2);
-		    TestUV += UV;
+            TestUV = RotUVCenter(TestUV, RandomRotator * PI2, UV);
+            
+            float4 MeshHeight = T_TMeshDepth.SampleLevel(Sampler, MeshUV, 0);
+            MeshHeight.x =  MAX_HEIGHT - MeshHeight.x;
+
+            float4 CheckCurrentSceneColor = T_CurrentSceneDepth.SampleLevel(Sampler, TestUV, 0);
+            SceneHight =  MAX_HEIGHT - CheckCurrentSceneColor.x;
+
+            
+            //CheckBound
             if(TestUV.x > 1 || TestUV.y > 1 || TestUV.x < 0 || TestUV.y < 0)
-            {
-                //Grid2D.SetVector4Value<Attribute="Rotation">(IndexX, IndexY, float4(0, 0, 0, 0));
-                OutSpawn = false;
-                break;
-            }
-            
-            //float4 SceneColor = float4(0, 0, 0, 0);
-            float4 CurrentSceneColor = T_CurrentSceneDepth.SampleLevel(Sampler, TestUV, 0);
-            SceneHight = MaxHeight - CurrentSceneColor.x;
-            if(RootSceneColor.x + MeshHeight.x < SceneHight || RootSceneColor.x > SceneHight)
-            {
-                //Grid2D.SetVector4Value<Attribute="Rotation">(IndexX, IndexY, float4(0, 0, 0, 0));
-                OutSpawn = false;
-                break;
-            }
-            
-            //float4 T_CurrentSceneDepth = T_CurrentSceneDepth.SampleLevel(Sampler, TestUV, 0);
-            if(CurrentSceneColor.y > 0.001)
-            {
-                //Grid2D.SetVector4Value<Attribute="Rotation">(IndexX, IndexY, float4(0, 0, 0, 0));
-                OutSpawn = false;
-                break;
-            }
+                return;
+
+            //CheckHeight
+            if(RootSceneHeight + MeshHeight.x < SceneHight || RootSceneHeight > SceneHight)
+                return;
+            //CheckMask
+            if(CheckCurrentSceneColor.y > 0.001)
+                return;
+
         }
     }
-    //OutSpawn = false;
-    if(OutSpawn)
+    
+    SceneHight =  MAX_HEIGHT - (T_CurrentSceneDepth.SampleLevel(Sampler, UV, 0)).x;
+    RW_Result[uint2(ResultIndex.x * MaxResult.x, 0)] = float4(UV.x, UV.y, SceneHight /  MAX_HEIGHT, 0);
+    RW_Result[uint2(ResultIndex.x * MaxResult.x, 1)] = float4(RandomRotator, Size, 0, 0);
+    float4 CountColor = T_Result[uint2(MaxResult.x - 1, MaxResult.y - 1)];
+    CountColor.x = ResultIndex.x  + 1;
+    RW_Result[uint2(MaxResult.x - 1, MaxResult.y - 1)] = CountColor;
+}
+
+
+groupshared half2 shareMhalf2[THREADGROUPSIZE_X + 2][THREADGROUPSIZE_Y + 2];
+//T_TargetHeight .x : Height .y : GenerateMask
+void GenerateTargetHeight(int3 DispatchThreadId, int3 GroupThreadId, int3 GroupID)
+{
+    //
+    // int GenerateMask = T_TargetHeight[DispatchThreadId.xy].y;
+    // if (GenerateMask <= 0) return;
+    
+    float MaxCell;
+    T_SceneDepth.GetDimensions(MaxCell, MaxCell);
+    MaxCell -= 1;
+    
+    int PixelBoundSize = 1;
+    // 全局坐标
+    int2 globalPos = DispatchThreadId.xy;
+    
+    
+    // 加载主区域到共享内存
+     shareMhalf2[GroupThreadId.x + PixelBoundSize][GroupThreadId.y + PixelBoundSize] = T_TargetHeight[DispatchThreadId.xy].xy;
+ 
+    // 左边缘
+    if (GroupThreadId.x < PixelBoundSize)
     {
-        SceneHight = MaxHeight - (T_CurrentSceneDepth.SampleLevel(Sampler, UV, 0)).x;
-        RW_Result[uint2(ResultIndex.x * MaxResult.x, 0)] = float4(UV.x, UV.y, SceneHight / MaxHeight, 0);
-        RW_Result[uint2(ResultIndex.x * MaxResult.x, 1)] = float4(RandomRotator, Size, 0, 0);
-        float4 CountColor = T_Result[uint2(MaxResult.x - 1, MaxResult.y - 1)];
-        CountColor.x = ResultIndex.x  + 1;
-        RW_Result[uint2(MaxResult.x - 1, MaxResult.y - 1)] = CountColor;
+        int2 FillPos = globalPos - int2(PixelBoundSize, 0);
+        shareMhalf2[GroupThreadId.x][GroupThreadId.y + PixelBoundSize] = T_TargetHeight[clamp(FillPos, int2(0,0), MaxCell)].xy;
+    }
+    // 右边缘
+    if (GroupThreadId.x >= THREADGROUPSIZE_X - PixelBoundSize)
+    {
+        int2 FillPos = globalPos + int2(PixelBoundSize, 0);
+        shareMhalf2[GroupThreadId.x + PixelBoundSize * 2][GroupThreadId.y + PixelBoundSize] = T_TargetHeight[clamp(FillPos, int2(0,0), MaxCell)].xy;
+    }
+    // 上边缘
+    if (GroupThreadId.y < PixelBoundSize)
+    {
+        int2 FillPos = globalPos - int2(0, PixelBoundSize);
+        shareMhalf2[GroupThreadId.x + PixelBoundSize][GroupThreadId.y] = T_TargetHeight[clamp(FillPos, int2(0,0), MaxCell)].xy;
+    }
+    // 下边缘
+    if (GroupThreadId.y >= THREADGROUPSIZE_X - PixelBoundSize)
+    {
+        int2 FillPos = globalPos + int2(0, PixelBoundSize);
+        shareMhalf2[GroupThreadId.x + PixelBoundSize][GroupThreadId.y + PixelBoundSize * 2] = T_TargetHeight[clamp(FillPos, int2(0,0), MaxCell)].xy;
+    }
+	
+    // 同步线程
+    GroupMemoryBarrierWithGroupSync();
+    
+    for (int i = 0; i < THREADGROUPSIZE_X * 2; i ++)
+    {
+        float2 CurrentShareMHeight = shareMhalf2[GroupThreadId.x + PixelBoundSize][GroupThreadId.y + PixelBoundSize];
+        if (CurrentShareMHeight.y < 1) continue; 
+        for (int n = 0; n < 4; n++)
+        {
+            uint2 Offset = GroupThreadId.xy + PixelBoundSize + NeighbourOffset[n];
+            half2 ShareResult = shareMhalf2[Offset.x][Offset.y];
+            if ( ShareResult.y < 1 && ShareResult.x > CurrentShareMHeight.x )
+            {
+                ShareResult.y = 0;
+                shareMhalf2[GroupThreadId.x + PixelBoundSize][GroupThreadId.y + PixelBoundSize] = ShareResult;
+            }
+        }
+        GroupMemoryBarrierWithGroupSync();
+    }
+    
+    RW_TargetHeight[DispatchThreadId.xy] = float4(shareMhalf2[GroupThreadId.x + PixelBoundSize][GroupThreadId.y + PixelBoundSize], 0 ,0);
+}
+
+groupshared half3 shareExtenthalf2[THREADGROUPSIZE_X + EXTENTGENERATEMASK * 2][THREADGROUPSIZE_Y + EXTENTGENERATEMASK * 2];
+
+void ExtentGenerateMask(int3 DispatchThreadId, int3 GroupThreadId, int3 GroupID)
+{
+        float MaxCell;
+    T_SceneDepth.GetDimensions(MaxCell, MaxCell);
+    MaxCell -= 1;
+    
+    int PixelBoundSize = EXTENTGENERATEMASK;
+    int FindNum = PixelBoundSize * 2;
+    // 全局坐标
+    int2 globalPos = DispatchThreadId.xy;
+
+    float4 CurrentSceneColor = T_CurrentSceneDepth[DispatchThreadId.xy];
+    // 加载主区域到共享内存
+     shareExtenthalf2[GroupThreadId.x + PixelBoundSize][GroupThreadId.y + PixelBoundSize] = half3(CurrentSceneColor.xz, FindNum);
+ 
+    // 左边缘
+    if (GroupThreadId.x < PixelBoundSize)
+    {
+        int2 FillPos = globalPos - int2(PixelBoundSize, 0);
+        shareExtenthalf2[GroupThreadId.x][GroupThreadId.y + PixelBoundSize] = half3(T_CurrentSceneDepth[clamp(FillPos, int2(0,0), MaxCell)].xz, FindNum);
+    }
+    // 右边缘
+    if (GroupThreadId.x >= THREADGROUPSIZE_X - PixelBoundSize)
+    {
+        int2 FillPos = globalPos + int2(PixelBoundSize, 0);
+        shareExtenthalf2[GroupThreadId.x + PixelBoundSize * 2][GroupThreadId.y + PixelBoundSize] = half3(T_CurrentSceneDepth[clamp(FillPos, int2(0,0), MaxCell)].xz, FindNum);
+    }
+    // 上边缘
+    if (GroupThreadId.y < PixelBoundSize)
+    {
+        int2 FillPos = globalPos - int2(0, PixelBoundSize);
+        shareExtenthalf2[GroupThreadId.x + PixelBoundSize][GroupThreadId.y] = half3(T_CurrentSceneDepth[clamp(FillPos, int2(0,0), MaxCell)].xz, FindNum);
+    }
+    // 下边缘
+    if (GroupThreadId.y >= THREADGROUPSIZE_X - PixelBoundSize)
+    {
+        int2 FillPos = globalPos + int2(0, PixelBoundSize);
+        shareExtenthalf2[GroupThreadId.x + PixelBoundSize][GroupThreadId.y + PixelBoundSize * 2] = half3(T_CurrentSceneDepth[clamp(FillPos, int2(0,0), MaxCell)].xz, FindNum);
+    }
+	
+    // 同步线程
+    GroupMemoryBarrierWithGroupSync();
+    
+    for (int i = 0; i < THREADGROUPSIZE_X * 2; i ++)
+    {
+        half3 CurrentShareMHeight = shareExtenthalf2[GroupThreadId.x + PixelBoundSize][GroupThreadId.y + PixelBoundSize];
+        if (CurrentShareMHeight.y > 0 || CurrentShareMHeight.z <= 0) continue; 
+        for (int n = 0; n < 4; n++)
+        {
+            uint2 Offset = GroupThreadId.xy + PixelBoundSize + NeighbourOffset[n];
+            half3 ShareResult = shareExtenthalf2[Offset.x][Offset.y];
+            if ( ShareResult.y > 0 && ShareResult.x < CurrentShareMHeight.x && ShareResult.z > 0)
+            {
+                ShareResult.z -= 1;
+                shareExtenthalf2[GroupThreadId.x + PixelBoundSize][GroupThreadId.y + PixelBoundSize].y = ShareResult.y;
+                shareExtenthalf2[GroupThreadId.x + PixelBoundSize][GroupThreadId.y + PixelBoundSize].z = ShareResult.z;
+            }
+        }
+        GroupMemoryBarrierWithGroupSync();
+    }
+    
+    RW_CurrentSceneDepth[DispatchThreadId.xy].z = shareExtenthalf2[GroupThreadId.x + PixelBoundSize][GroupThreadId.y + PixelBoundSize].y;
+}
+
+
+
+void InitCurrentSceneDepth(int3 DispatchThreadId)
+{
+    
+    float3 SceneNormal = T_SceneNormal[DispatchThreadId.xy].xyz;
+    float ObjHeight = MAX_HEIGHT - min(T_ObjectDepth[DispatchThreadId.xy].x, 10000);
+    
+
+    float Height = MAX_HEIGHT - T_SceneDepth[DispatchThreadId.xy].x;
+    float UnGenerateMask = (T_ObjectNormal[DispatchThreadId.xy].z > 0.01) && (ObjHeight > Height);
+    float GenerateMask = dot(SceneNormal, float3(0, 0, 1)) < .75 && dot(SceneNormal, float3(0, 0, 1)) > 0;
+    
+    RW_CurrentSceneDepth[DispatchThreadId.xy] = float4(Height, UnGenerateMask, GenerateMask, 0);
+    RW_TargetHeight[DispatchThreadId.xy] = float4(Height, GenerateMask, 0, 0);
+    
+}
+
+
+groupshared half3 ShareMeshHeight[THREADGROUPSIZE_X][THREADGROUPSIZE_Y];
+void MeshFillVerticalRock(int3 DispatchThreadId)
+{
+    float MaxCell;
+    RW_CurrentSceneDepthA.GetDimensions(MaxCell, MaxCell);
+    MaxCell -= 1;
+    
+    float2 UV = DispatchThreadId.xy / MaxCell;
+    float MeshUVMaxCell;
+    T_TMeshDepth.GetDimensions(MeshUVMaxCell, MeshUVMaxCell);
+    MeshUVMaxCell -= 1;
+
+    uint2 MaxResult = 0;
+    RW_ResultA.GetDimensions(MaxResult.x, MaxResult.y);
+
+    //Init
+    RW_ResultB[DispatchThreadId.xy] = RW_ResultA[DispatchThreadId.xy];
+    RW_CurrentSceneDepthB[DispatchThreadId.xy] = RW_CurrentSceneDepthA[DispatchThreadId.xy];
+    RW_FilterResult[DispatchThreadId.xy] = 0;
+    RW_SaveRotateScale[DispatchThreadId.xy] = 0;
+    RW_DebugView[DispatchThreadId.xy].xy = 0;
+    
+    float4 MeshHeightColor = TA_MeshHeight.SampleLevel(Sampler, float3(UV, 1), 0);
+    // RW_DebugView[DispatchThreadId.xy] = MeshHeightColor;
+    
+    float4 RootSceneColor = RW_CurrentSceneDepthA[DispatchThreadId.xy];
+    float4 ResultIndex = RW_ResultA[uint2(MaxResult.x - 1, MaxResult.y - 1)];
+    float3 Dir = T_SceneNormal[DispatchThreadId.xy].xyz;
+    float4 TargetHeightColor = T_TargetHeight[DispatchThreadId.xy];
+    float Rotate = atan2(Dir.x, Dir.y) * 2 + RandomRotator;
+    float TargetHeight = TargetHeightColor.x + HeightOffset;
+    float RootSceneHeight = TargetHeight.x;
+    float RootGenerateMask = RootSceneColor.z;
+    float RootUnGenerateMask = RootSceneColor.y;
+    
+    if (RootGenerateMask == 0 || RootUnGenerateMask > 0) return;
+
+    // RW_DebugView[DispatchThreadId.xy] =  RootSceneColor;
+    float UnGenerateMaskCount = 0;
+    float GenerateMaskCount = 0;
+    float MaxIndex = 10;
+    float MeshStep = Size / MaxIndex;
+    int VoidCount = 0;
+    LOOP
+    for(float X = 0; X < MaxIndex; X++)
+    {
+        for(float Y = 0; Y < MaxIndex; Y++)
+        {
+            //Sample Mesh Height
+            //To avoid sampling multiple pixels, otherwise invalid data maybe judged as usable height.
+            // float4 MeshHeightColor = T_TMeshDepth[clamp(uint2(MeshUV.x *MeshUVMaxCell, MeshUV.y * MeshUVMaxCell ), 0, MeshUVMaxCell)];
+            float2 MeshUV = float2(X / MaxIndex, Y / MaxIndex);
+            MeshUV = RotUVCenter(MeshUV, Rotate, 0.5 );
+            MeshUV = clamp(uint2(MeshUV.x *MeshUVMaxCell, MeshUV.y * MeshUVMaxCell ), 0, MeshUVMaxCell);
+            float3 MeshUV3D = float3(MeshUV, SelectIndex);
+            float4 MeshHeightColor = TA_MeshHeight[MeshUV3D];
+
+            BRANCH
+            if (MeshHeightColor.x < 10 ) continue;
+            
+            float MeshHeight =  MeshHeightColor.x + RootSceneHeight;
+            VoidCount += 1;
+
+            //Sample Scene Height
+            //To avoid sampling multiple pixels, otherwise invalid data maybe judged as usable height.
+            float2 TestUV = float2(UV.x + (X - MaxIndex/2) * MeshStep, UV.y + (Y - MaxIndex/2) * MeshStep);
+            float4 CheckCurrentSceneColor = RW_CurrentSceneDepthA[clamp(uint2(TestUV.x * MaxCell, TestUV.y * MaxCell ), 0, MaxCell)];
+            float CurrentSceneHight =  CheckCurrentSceneColor.x;
+            float GenerateMask = CheckCurrentSceneColor.z;
+            float UnGenerateMask = CheckCurrentSceneColor.y;
+            
+            //CheckBound
+            BRANCH
+            if(TestUV.x > 1 || TestUV.y > 1 || TestUV.x < 0 || TestUV.y < 0) return;
+            
+            //CheckHeight
+            // if(RootSceneHeight > CurrentSceneHight && GenerateMask == 0) return;
+            // [branch]
+            // if(RootSceneHeight + MeshHeight.x > TargetHeight + 50 ) continue;
+            // RW_DebugView[uint2(MeshUV.x * 256, MeshUV.y * 256)] = 1;
+            // RW_DebugView[uint2(TestUV.x * 256, TestUV.y * 256)] = 1;
+            //CheckMask When the GenerateMask Count of two objects are equals, I need to consider UnGenerateMask Count
+            UnGenerateMaskCount += UnGenerateMask > 0;
+            GenerateMaskCount += (GenerateMask > 0) && (UnGenerateMask == 0);
+                
+        }
+    }
+    //Check how many effective samples there are
+    GenerateMaskCount = GenerateMaskCount > 3 ? GenerateMaskCount : 0;
+    GenerateMaskCount = UnGenerateMaskCount / VoidCount < .9 ? GenerateMaskCount : 0;
+    
+    uint Number = DispatchThreadId.x + DispatchThreadId.y * MaxCell;
+    float4 FilterResult = float4(GenerateMaskCount, UnGenerateMaskCount, DispatchThreadId.x, DispatchThreadId.y);
+    RW_FilterResult[DispatchThreadId.xy] = FilterResult;
+    RW_SaveRotateScale[DispatchThreadId.xy] = float4(Rotate, Size, RootSceneHeight, SelectIndex);
+
+    
+    RW_DebugView[DispatchThreadId.xy] = FilterResult / 100.0;
+    RW_DebugView[DispatchThreadId.xy].z = 0;
+
+}
+
+
+groupshared float4 sharedMax[THREADGROUPSIZE_X]; // 共享内存加速访问
+
+void FindBestPixel(int3 DispatchThreadId, uint3 GroupThreadId, uint3 GroupId)
+{
+    // uint index = GroupId * THREADGROUPSIZE_X + GroupThreadId.x;
+   
+    float MaxCell = 0;
+    RW_FilterResult.GetDimensions(MaxCell, MaxCell);
+    //index = (GroupId * THREADGROUPSIZE_X) % THREADGROUPSIZE_X;
+    
+    
+
+    uint2 GroupToDispatchThreadId = uint2(DispatchThreadId.x % THREADGROUPSIZE_X, DispatchThreadId.x / THREADGROUPSIZE_X);
+    // RW_DebugView[GroupToDispatchThreadId] = RW_FilterResult[GroupToDispatchThreadId];
+    sharedMax[GroupThreadId.x] = RW_FilterResult[GroupToDispatchThreadId];
+    // RW_DebugView[GroupToDispatchThreadId] = RW_SaveRotateScale[GroupToDispatchThreadId];
+    GroupMemoryBarrierWithGroupSync(); 
+    
+    for (uint stride = THREADGROUPSIZE_X / 2; stride > 0; stride >>= 1)
+    {
+        if (GroupThreadId.x < stride )
+        {
+            float4 shareValue = sharedMax[GroupThreadId.x];
+            float4 CompareValue = sharedMax[GroupThreadId.x + stride];
+            if (shareValue.x < CompareValue.x)
+            {
+                sharedMax[GroupThreadId.x] = CompareValue;
+            }
+            if(shareValue.x == CompareValue.x && shareValue.y > CompareValue.y)
+            {
+                sharedMax[GroupThreadId.x] = CompareValue;
+            }
+
+        }
+        GroupMemoryBarrierWithGroupSync();
+    }
+
+    if (GroupThreadId.x == 0) 
+    {
+        RW_FindPixelBuffer[GroupId.x] = sharedMax[0];
+    }
+    float4 MinValue = sharedMax[0];
+    
+    
+
+}
+
+groupshared float4 sharedMaxRW[THREADGROUPSIZE_X]; // 共享内存加速访问
+
+void FindBestPixelInRW(int3 DispatchThreadId, uint3 GroupThreadId ,uint3 GroupId)
+{
+    
+    uint index = GroupId.x * THREADGROUPSIZE_X + GroupThreadId.x;
+    float MaxCell = 0;
+    RW_FilterResult.GetDimensions(MaxCell, MaxCell);
+
+    //uint2 GroupToDispatchThreadId = uint2(DispatchThreadId.x % THREADGROUPSIZE_X, DispatchThreadId.x / THREADGROUPSIZE_X);
+    sharedMaxRW[GroupThreadId.x] = RW_FindPixelBuffer[GroupThreadId.x];
+    
+    GroupMemoryBarrierWithGroupSync(); // 同步线程组
+
+    // 归约：逐步折半比较最小值
+    for (uint stride = THREADGROUPSIZE_X / 2; stride > 0; stride >>= 1)
+    {
+        if (GroupThreadId.x < stride) {
+            sharedMaxRW[GroupThreadId.x] = sharedMaxRW[GroupThreadId.x].x > sharedMaxRW[GroupThreadId.x + stride].x ? sharedMaxRW[GroupThreadId.x] : sharedMaxRW[GroupThreadId.x + stride];
+        }
+        GroupMemoryBarrierWithGroupSync();
+    }
+    //RW_DebugView[uint2(GroupThreadId.x, GroupThreadId.x / MaxCell)] = sharedMaxRW[0];
+
+    if (GroupThreadId.x == 0) 
+    {
+        float4 BestPixel = sharedMaxRW[0];
+
+        if(BestPixel.x < 2) return;
+
+        
+        uint2 MaxResult = 0;
+        RW_ResultA.GetDimensions(MaxResult.x, MaxResult.y);
+        float4 ResultIndex = RW_ResultA[uint2(MaxResult.x - 1, MaxResult.y - 1)];
+
+        float MaxCell;
+        RW_CurrentSceneDepthA.GetDimensions(MaxCell, MaxCell);
+        
+        uint2 CurrentIndex = BestPixel.zw;
+        float2 UV = CurrentIndex.xy / float(MaxCell - 1);
+
+
+        float4 SaveDataColor = RW_SaveRotateScale[CurrentIndex];
+        float Rotate = SaveDataColor.x;
+        float Scale = SaveDataColor.y;
+        float SceneHeight = SaveDataColor.z;
+        RW_ResultB[uint2(ResultIndex.x, 0)] = float4(UV.x, UV.y, SceneHeight , 0);
+        RW_ResultB[uint2(ResultIndex.x, 1)] = float4(Rotate, Scale, SelectIndex, 0);
+        RW_ResultB[uint2(MaxResult.x - 1, MaxResult.y - 1)].x = ResultIndex.x  + 1;
         
     }
 }
 
-[numthreads(THREADGROUPSIZE_X, THREADGROUPSIZE_Y, THREADGROUPSIZE_Z)]
-void DrawCurrentHeightMap(
-                       uint3 DispatchThreadId : SV_DispatchThreadID,
-                       uint GroupIndex : SV_GroupIndex)
+groupshared half3 shareFilterExtent[THREADGROUPSIZE_X + 2][THREADGROUPSIZE_Y + 2];
+groupshared half2 shareFilterExtentNumber[THREADGROUPSIZE_X + 2][THREADGROUPSIZE_Y + 2];
+
+void FilterResultExtent(int3 DispatchThreadId, int3 GroupThreadId, int3 GroupID)
 {
+    //InitBuffer
+    RW_Deduplication[DispatchThreadId.xy] = -1;
+    RW_FindPixelBufferResult_Number[DispatchThreadId.x] = 0;
+    RW_FindPixelBufferResult_NumberCount[0] = 0;
+
     
-    float MaxHeight = 10000;
+    float MaxCell;
+    T_SceneDepth.GetDimensions(MaxCell, MaxCell);
+    MaxCell -= 1;
+    
+    int PixelBoundSize = 1;
+    int FindNum = PixelBoundSize * 2;
+
+    int2 globalPos = DispatchThreadId.xy;
+    
+    shareFilterExtent[GroupThreadId.x + PixelBoundSize][GroupThreadId.y + PixelBoundSize] = half3(RW_FilterResult[DispatchThreadId.xy].xy, FindNum);
+    shareFilterExtentNumber[GroupThreadId.x + PixelBoundSize][GroupThreadId.y + PixelBoundSize] = RW_FilterResult[DispatchThreadId.xy].zw;
+    
+    // Left
+    if (GroupThreadId.x < PixelBoundSize)
+    {
+        int2 FillPos = clamp( globalPos - int2(PixelBoundSize, 0), int2(0,0), MaxCell);
+        shareFilterExtent[GroupThreadId.x][GroupThreadId.y + PixelBoundSize] = half3(RW_FilterResult[FillPos].xy, FindNum);
+        shareFilterExtentNumber[GroupThreadId.x][GroupThreadId.y + PixelBoundSize] = RW_FilterResult[FillPos].zw;
+    }
+    // Right
+    if (GroupThreadId.x >= THREADGROUPSIZE_X - PixelBoundSize)
+    {
+        int2 FillPos = clamp( globalPos + int2(PixelBoundSize, 0), int2(0,0), MaxCell);
+        shareFilterExtent[GroupThreadId.x + PixelBoundSize * 2][GroupThreadId.y + PixelBoundSize] = half3(RW_FilterResult[FillPos].xy, FindNum);
+        shareFilterExtentNumber[GroupThreadId.x + PixelBoundSize * 2][GroupThreadId.y + PixelBoundSize] = RW_FilterResult[FillPos].zw;
+    }
+    // Top
+    if (GroupThreadId.y < PixelBoundSize)
+    {
+        int2 FillPos = clamp( globalPos - int2(0, PixelBoundSize), int2(0,0), MaxCell);
+        shareFilterExtent[GroupThreadId.x + PixelBoundSize][GroupThreadId.y] = half3(RW_FilterResult[FillPos].xy, FindNum);
+        shareFilterExtentNumber[GroupThreadId.x + PixelBoundSize][GroupThreadId.y] = RW_FilterResult[FillPos].zw;
+    }
+    // Down
+    if (GroupThreadId.y >= THREADGROUPSIZE_X - PixelBoundSize)
+    {
+        int2 FillPos = clamp( globalPos + int2(0, PixelBoundSize), int2(0,0), MaxCell);
+        shareFilterExtent[GroupThreadId.x + PixelBoundSize][GroupThreadId.y + PixelBoundSize * 2] = half3(RW_FilterResult[FillPos].xy, FindNum);
+        shareFilterExtentNumber[GroupThreadId.x + PixelBoundSize][GroupThreadId.y + PixelBoundSize * 2] = RW_FilterResult[FillPos].zw;
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+    
+    LOOP
+    for (int i = 0; i < THREADGROUPSIZE_X * 2; i ++)
+    {
+        half3 CurrentShare = shareFilterExtent[GroupThreadId.x + PixelBoundSize][GroupThreadId.y + PixelBoundSize];
+        float CurrentGenerateCount = CurrentShare.x;
+        float CurrentUnGenerateCount = CurrentShare.y;
+        float CurrentFindNum = CurrentShare.z;
+        
+        UNROLL
+        for (int n = 0; n < 4; n++)
+        {
+            uint2 Offset = GroupThreadId.xy + PixelBoundSize + NeighbourOffset[n];
+            half3 ShareResult = shareFilterExtent[Offset.x][Offset.y];
+            half2 ShareResultNumber = shareFilterExtentNumber[Offset.x][Offset.y];
+            float GenerateCount = ShareResult.x;
+            float UnGenerateCount = ShareResult.y;
+            float FindNum = ShareResult.z;
+            BRANCH
+            if ( (GenerateCount < CurrentGenerateCount && FindNum > 0 )||
+                (GenerateCount == CurrentGenerateCount && FindNum > 0 && UnGenerateCount <= CurrentUnGenerateCount))
+            {
+                FindNum -= 1;
+                shareFilterExtent[GroupThreadId.x + PixelBoundSize][GroupThreadId.y + PixelBoundSize] = ShareResult;
+                shareFilterExtent[GroupThreadId.x + PixelBoundSize][GroupThreadId.y + PixelBoundSize].z = FindNum;
+                shareFilterExtentNumber[GroupThreadId.x + PixelBoundSize][GroupThreadId.y + PixelBoundSize] = ShareResultNumber;
+                CurrentGenerateCount = GenerateCount;
+                CurrentUnGenerateCount = UnGenerateCount;
+            }
+        }
+        
+        GroupMemoryBarrierWithGroupSync();
+    }
+    float3 ShareColor = shareFilterExtent[GroupThreadId.x + PixelBoundSize][GroupThreadId.y + PixelBoundSize];
+    float2 ShareNumberColor = shareFilterExtentNumber[GroupThreadId.x + PixelBoundSize][GroupThreadId.y + PixelBoundSize];
+    RW_FilterResulteMult[DispatchThreadId.xy].xy = ShareNumberColor;
+    RW_FilterResulteMult[DispatchThreadId.xy].z = ShareColor.z;
+    RW_DebugView[DispatchThreadId.xy].xy = float4( ShareNumberColor, ShareColor.z,0);
+    
+}
+
+void FilterResultReduce(int3 DispatchThreadId, int3 GroupThreadId, int3 GroupID)
+{
+    float MaxCell;
+    T_SceneDepth.GetDimensions(MaxCell, MaxCell);
+    MaxCell -= 1;
+    
+    int PixelBoundSize = 1;
+    int FindNum = PixelBoundSize * 2;
+
+    int2 globalPos = DispatchThreadId.xy;
+    shareFilterExtent[GroupThreadId.x + PixelBoundSize][GroupThreadId.y + PixelBoundSize] = RW_FilterResulteMult[DispatchThreadId.xy];
+    
+    // Left
+    if (GroupThreadId.x < PixelBoundSize)
+    {
+        int2 FillPos = clamp( globalPos - int2(PixelBoundSize, 0), int2(0,0), MaxCell);
+        shareFilterExtent[GroupThreadId.x][GroupThreadId.y + PixelBoundSize] = RW_FilterResulteMult[FillPos];
+    }
+    // Right
+    if (GroupThreadId.x >= THREADGROUPSIZE_X - PixelBoundSize)
+    {
+        int2 FillPos = clamp( globalPos + int2(PixelBoundSize, 0), int2(0,0), MaxCell);
+        shareFilterExtent[GroupThreadId.x + PixelBoundSize * 2][GroupThreadId.y + PixelBoundSize] = RW_FilterResulteMult[FillPos];
+    }
+    // Top
+    if (GroupThreadId.y < PixelBoundSize)
+    {
+        int2 FillPos = clamp( globalPos - int2(0, PixelBoundSize), int2(0,0), MaxCell);
+        shareFilterExtent[GroupThreadId.x + PixelBoundSize][GroupThreadId.y] = RW_FilterResulteMult[FillPos];
+    }
+    // Down
+    if (GroupThreadId.y >= THREADGROUPSIZE_X - PixelBoundSize)
+    {
+        int2 FillPos = clamp( globalPos + int2(0, PixelBoundSize), int2(0,0), MaxCell);
+        shareFilterExtent[GroupThreadId.x + PixelBoundSize][GroupThreadId.y + PixelBoundSize * 2] = RW_FilterResulteMult[FillPos];
+    }
+    
+    GroupMemoryBarrierWithGroupSync();
+    
+    LOOP
+    for (int i = 0; i < THREADGROUPSIZE_X * 2; i ++)
+    {
+        half3 CurrentShare = shareFilterExtent[GroupThreadId.x + PixelBoundSize][GroupThreadId.y + PixelBoundSize];
+        float CurrentNumberX = CurrentShare.x;
+        float CurrentNumberY = CurrentShare.y;
+        float CurrentFindNum = CurrentShare.z;
+        
+        int Reduce = 0;
+        int Number = -1;
+        int ReduceNeighbourCount = 0;
+        int Neighbourp = 0;
+        int NeighbourBoundCount = 0;
+        
+        UNROLL
+        for (int n = 0; n < 4; n++)
+        {
+            uint2 Offset = GroupThreadId.xy + PixelBoundSize + NeighbourOffset[n];
+            half3 ShareResult = shareFilterExtent[Offset.x][Offset.y];
+            half2 ShareResultNumber = shareFilterExtentNumber[Offset.x][Offset.y];
+            float NumberX = ShareResult.x;
+            float NumberY = ShareResult.y;
+            float FindNum = ShareResult.z;
+
+            ReduceNeighbourCount += FindNum == -1;
+            Neighbourp = max(Neighbourp, FindNum > 0);
+
+            if (CurrentFindNum == 0)
+            {
+                if (FindNum == -1 && CurrentNumberX == NumberX && CurrentNumberY == NumberY)
+                {
+                    Reduce = 1;
+                    break;
+                }
+            }
+            else
+            {
+                if (FindNum > -1 && CurrentNumberX == NumberX && CurrentNumberY == NumberY )
+                {
+                    continue;
+                }
+                Reduce = 1;
+                break;
+            }
+            NeighbourBoundCount += FindNum == 0;
+        }
+
+        if (ReduceNeighbourCount > 3 || NeighbourBoundCount == 4 || Reduce == 1 || (ReduceNeighbourCount > 2 && Neighbourp == 0))
+        {
+            shareFilterExtent[GroupThreadId.x + PixelBoundSize][GroupThreadId.y + PixelBoundSize].z = -1;
+        }
+        GroupMemoryBarrierWithGroupSync();
+    }
+    float3 ShareColor = shareFilterExtent[GroupThreadId.x + PixelBoundSize][GroupThreadId.y + PixelBoundSize];
+    
+    BRANCH
+    if (ShareColor.z == -1)
+    {
+        RW_FilterResulteMult[DispatchThreadId.xy].xy = -1;
+    }
+}
+
+void Deduplication(int3 DispatchThreadId)
+{
+    float4 NumberColor = RW_FilterResulteMult[DispatchThreadId.xy];
+    RW_Deduplication[uint2(NumberColor.x, NumberColor.y)] = 1; 
+}
+
+void FilterResultReduceSelect(int3 DispatchThreadId)
+{
+    float4 SelectColor = RW_Deduplication[DispatchThreadId.xy];
+    if (SelectColor.x < 0) return; 
+    
+    uint PreCount = 0;
+    InterlockedAdd(RW_FindPixelBufferResult_NumberCount[0], 1, PreCount);
+    if (PreCount < 256)
+    {
+        RW_FindPixelBufferResult_Number[PreCount] = uint2(DispatchThreadId.x, DispatchThreadId.y);
+    }
+}
+
+void UpdateCurrentScene(int3 DispatchThreadId)
+{
+    //RW_DebugView[DispatchThreadId.xy] = RW_SaveRotateScale[DispatchThreadId.xy];
+    
     float MaxCell = 0.0;
     uint2 MaxResult = 0;
-    T_Result.GetDimensions(MaxResult.x, MaxResult.y);
-    float4 ResultIndex = T_Result[uint2(MaxResult.x - 1, MaxResult.y - 1)];
+    RW_ResultA.GetDimensions(MaxResult.x, MaxResult.y);
+    float4 ResultIndex = RW_ResultA[uint2(MaxResult.x - 1, MaxResult.y - 1)];
+    
+    RW_ResultB[DispatchThreadId.xy] = RW_ResultA[DispatchThreadId.xy];
     if (abs(ResultIndex.x - ResultIndex.y) < .01)
         return;
     
-    float4 ResultPosData = T_Result[uint2(ResultIndex.x - 1, 0)];
-    float4 ResultRotSizeData = T_Result[uint2(ResultIndex.x - 1, 1)];
-    RW_DebugView[DispatchThreadId.xy] = ResultRotSizeData;
-    T_CurrentSceneDepth.GetDimensions(MaxCell, MaxCell);
+    float4 ResultPosData = RW_ResultA[uint2(ResultIndex.x - 1, 0)];
+    float4 ResultRotSizeData = RW_ResultA[uint2(ResultIndex.x - 1, 1)];
+    
+    RW_CurrentSceneDepthA.GetDimensions(MaxCell, MaxCell);
     float2 UV = (DispatchThreadId.xy + .5) / MaxCell;
     
     UV -= ResultPosData.xy;
-    UV = RotUV(UV, ResultRotSizeData.x * PI2);
+    UV = RotUV(UV, ResultRotSizeData.x);
     UV = ScaleUV(UV, 1 / ResultRotSizeData.y) ;
     UV += .5;
-    if (UV .x > 1 || UV .y > 1 || UV .x < 0 || UV .y < 0)
-        return;
     
-    float4 MeshHeight = T_TMeshDepth.SampleLevel(Sampler, UV, 0);
-    MeshHeight.x = MaxHeight - MeshHeight.x + (ResultPosData.z * MaxHeight);
+    if (UV .x > 1 || UV .y > 1 || UV .x < 0 || UV .y < 0)  return;
     
-    float FixDepth = max(T_CurrentSceneDepth[DispatchThreadId.xy].x - MeshHeight.x, 0.0);
-    float Mask = max(T_CurrentSceneDepth[DispatchThreadId.xy].y, MeshHeight.x > 0.0);
-    float4 CurrentSceneDepthColor = float4(FixDepth, Mask, 0, 0);
-    RW_CurrentSceneDepth[DispatchThreadId.xy] = CurrentSceneDepthColor;
+    float3 MeshUV3D = float3(UV, SelectIndex);
+    float4 MeshHeightColor = TA_MeshHeight.SampleLevel(Sampler, MeshUV3D, 0);
+    float4 CurrentSceneDepthColor = RW_CurrentSceneDepthA[DispatchThreadId.xy];
+    float MeshHeight = MeshHeightColor.x;
+    float MeshMsak = MeshHeight > -10000;
+
+    if (!MeshMsak) return;
     
-    float4 ResultColor = float4(ResultIndex.x, ResultIndex.x, 0, 0);
-    RW_Result[uint2(MaxResult.x - 1, MaxResult.y - 1)] = ResultColor;
+    float RootHeihgt = ResultPosData.z;
+    float CurrentHeight = CurrentSceneDepthColor.x;
+    float CurrentMask = CurrentSceneDepthColor.y;
+    float CurrentGenerateMask = CurrentSceneDepthColor.z;
+
+    float DrawMeshHeight = MeshHeight + RootHeihgt * MeshMsak;
+    float DrawMask = DrawMeshHeight > CurrentHeight;
+    
+    float FixDepth = min(max(CurrentHeight, DrawMeshHeight), MAX_HEIGHT);
+    float Mask = max(CurrentMask, DrawMask);
+    CurrentSceneDepthColor.xyz = float3(FixDepth, Mask, CurrentGenerateMask);
+    RW_CurrentSceneDepthB[DispatchThreadId.xy] = CurrentSceneDepthColor;
+
+    // RW_DebugView[DispatchThreadId.xy] = CurrentSceneDepthColor;
+    RW_DebugView[DispatchThreadId.xy].z = DrawMask * 1000;
+    //Result.x = Current Count ，Result.y = Pre Count;
+    RW_ResultB[uint2(MaxResult.x - 1, MaxResult.y - 1)] = float4(ResultIndex.x, ResultIndex.x, 0, 0);
 }
 
-// [numthreads(THREADGROUPSIZE_X, THREADGROUPSIZE_Y, THREADGROUPSIZE_Z)]
-// void DrawCurrentHeightMapSingle(
-//                        uint3 DispatchThreadId : SV_DispatchThreadID,
-//                        uint GroupIndex : SV_GroupIndex)
-// {
-//     float MaxHeight = 10000;
-//     uint2 MaxResult = 0;
-//     RW_Result.GetDimensions(MaxResult.x, MaxResult.y);
-//     float4 ResultIndex = RW_Result[uint2(MaxResult.x - 1, MaxResult.y - 1)];
-//     float4 ResultData = RW_Result[uint2(round(ResultIndex.x * MaxResult.x), round(MaxResult.y - 1))];
-//     float MaxCell = 0.0;
-//     T_CurrentSceneDepth.GetDimensions(MaxCell, MaxCell);
-//     float2 UV = (DispatchThreadId.xy + .5) / MaxCell;
-//     UV -= .5;
-//     UV *= Size;
-//     UV = float2(dot(UV, float2(cos(RandomRotator), sin(RandomRotator) * -1)), dot(UV, float2(sin(RandomRotator), cos(RandomRotator))));
-//     UV += .5 ;
-//     float4 MeshHeight = T_TMeshDepth.SampleLevel(Sampler, UV, 0);
-//     MeshHeight.x = MaxHeight - MeshHeight.x;
-//     float FixDepth = max(RW_CurrentSceneDepth[DispatchThreadId.xy].x - MeshHeight.x, 0.0);
-//     float Mask = max(RW_CurrentSceneDepth[DispatchThreadId.xy].y, MeshHeight.x > 0.0);
-//     RW_CurrentSceneDepth[DispatchThreadId.xy].x = FixDepth;
-//     RW_CurrentSceneDepth[DispatchThreadId.xy].y = Mask;
-// }
+void UpdateCurrentSceneMult(int3 DispatchThreadId)
+{
+    //RW_DebugView[DispatchThreadId.xy] = RW_SaveRotateScale[DispatchThreadId.xy];
+    uint MaxResultCount = RW_FindPixelBufferResult_NumberCount[0];
+    uint2 MaxResult = 0;
+    RW_ResultA.GetDimensions(MaxResult.x, MaxResult.y);
+    float4 ResultIndex = RW_ResultA[uint2(MaxResult.x - 1, MaxResult.y - 1)];
+    uint CurrentResultIndex = ResultIndex.x;
+    
+    RW_ResultB[DispatchThreadId.xy] = RW_ResultA[DispatchThreadId.xy];
+    
+    for (int i = 0; i < MaxResultCount; i++)
+    {
+        uint2 CurrentIndex = RW_FindPixelBufferResult_Number[i];
+        float MaxCell;
+        RW_CurrentSceneDepthA.GetDimensions(MaxCell, MaxCell);
+        CurrentResultIndex += 1;
+        
+        float2 WirteUV = (CurrentIndex + .5) / MaxCell;
+        float4 SaveDataColor = RW_SaveRotateScale[CurrentIndex];
+        float Rotate = SaveDataColor.x;
+        float Scale = SaveDataColor.y;
+        float SceneHeight = SaveDataColor.z;
+        RW_ResultB[uint2(ResultIndex.x, 0)] = float4(WirteUV.x, WirteUV.y, SceneHeight , 0);
+        RW_ResultB[uint2(ResultIndex.x, 1)] = float4(Rotate, Scale, 0, 0);
+        RW_ResultB[uint2(MaxResult.x - 1, MaxResult.y - 1)].x = CurrentResultIndex;
+        
+        float2 UV = (DispatchThreadId.xy + .5) / MaxCell;
+    
+        UV -= WirteUV;
+        UV = RotUV(UV, Rotate);
+        UV = ScaleUV(UV, 1 / Scale) ;
+        UV += .5;
+    
+        if (UV .x > 1 || UV .y > 1 || UV .x < 0 || UV .y < 0)  continue;
+    
+        float3 MeshUV3D = float3(UV, SelectIndex);
+        float4 MeshHeightColor = TA_MeshHeight.SampleLevel(Sampler, MeshUV3D, 0);
+        float4 CurrentSceneDepthColor = RW_CurrentSceneDepthA[DispatchThreadId.xy];
+        float MeshHeight = MeshHeightColor.x;
+        float MeshMsak = MeshHeight > -10000;
+        
+        if (!MeshMsak) continue;
+        
+        float CurrentHeight = CurrentSceneDepthColor.x;
+        float CurrentMask = CurrentSceneDepthColor.y;
+        float CurrentGenerateMask = CurrentSceneDepthColor.z;
+
+        float DrawMeshHeight = MeshHeight + SceneHeight * MeshMsak;
+        float DrawMask = DrawMeshHeight > CurrentHeight;
+    
+        float FixDepth = min(max(CurrentHeight, DrawMeshHeight), MAX_HEIGHT);
+        float Mask = max(CurrentMask, DrawMask);
+        CurrentSceneDepthColor.xyz = float3(FixDepth, Mask, CurrentGenerateMask);
+        RW_CurrentSceneDepthB[DispatchThreadId.xy] = CurrentSceneDepthColor;
+    }
+    
+
+    
+
+
+    // RW_DebugView[DispatchThreadId.xy] = CurrentSceneDepthColor;
+    // RW_DebugView[DispatchThreadId.xy].z = DrawMask * 1000;
+    //Result.x = Current Count ，Result.y = Pre Count;
+    RW_ResultB[uint2(MaxResult.x - 1, MaxResult.y - 1)] = float4(ResultIndex.x, ResultIndex.x, 0, 0);
+}
+
+[numthreads(THREADGROUPSIZE_X, THREADGROUPSIZE_Y, THREADGROUPSIZE_Z)]
+void MeshFillMult(
+                        uint3 GroupId : SV_GroupID,
+                        uint3 DispatchThreadId : SV_DispatchThreadID,
+                        uint3 GroupThreadId : SV_GroupThreadID,
+                        uint GroupIndex : SV_GroupIndex) 
+{
+    
+#if FMESHFILL_GENERAL
+    MeshFillGeneral(DispatchThreadId);
+#elif FMESHFILL_INIT
+    InitCurrentSceneDepth(DispatchThreadId);
+    
+#elif FMESHFILL_FINDBESTPIXEL
+    FindBestPixel(DispatchThreadId, GroupThreadId, GroupId);
+#elif FMESHFILL_FINDBESTPIXELRW_512
+    FindBestPixelInRW(DispatchThreadId, GroupThreadId, GroupId);
+#elif FMESHFILL_FINDBESTPIXELRW_256
+    FindBestPixelInRW(DispatchThreadId, GroupThreadId, GroupId);
+#elif  FMESHFILL_FILLVERTICALROCK
+    MeshFillVerticalRock(DispatchThreadId);
+#elif FMESHFILL_FILLCAPPINGROCK
+
+#elif FMESHFILL_TARGETHEIGHT
+    GenerateTargetHeight(DispatchThreadId, GroupThreadId, GroupId);
+
+#elif FMESHFILL_UPDATECURRENTHEIGHT
+    UpdateCurrentScene(DispatchThreadId);
+
+#elif FMESHFILL_EXTENTGENERATEMASK
+    ExtentGenerateMask(DispatchThreadId, GroupThreadId, GroupId);
+#elif FMESHFILL_FILTERRESULTEXTENT
+    FilterResultExtent(DispatchThreadId, GroupThreadId, GroupId);
+#elif FMESHFILL_FILTERRESULTREDUCE
+    FilterResultReduce(DispatchThreadId, GroupThreadId, GroupId);
+#elif FMESHFILL_DEDUPLICATION
+    Deduplication(DispatchThreadId);
+#elif FMESHFILL_FILTERRESULTSELECT
+    UpdateCurrentSceneMult(DispatchThreadId);
+#endif
+}
 
