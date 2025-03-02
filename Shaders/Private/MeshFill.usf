@@ -467,10 +467,11 @@ void MeshFillVerticalRock(int3 DispatchThreadId)
 }
 
 
-groupshared float4 sharedMax[THREADGROUPSIZE_X]; // 共享内存加速访问
 
+groupshared half4 SharedMax[THREADGROUPSIZE_X];
 void FindBestPixel(int3 DispatchThreadId, uint3 GroupThreadId, uint3 GroupId)
 {
+
     // uint index = GroupId * THREADGROUPSIZE_X + GroupThreadId.x;
    
     float MaxCell = 0;
@@ -481,7 +482,8 @@ void FindBestPixel(int3 DispatchThreadId, uint3 GroupThreadId, uint3 GroupId)
 
     uint2 GroupToDispatchThreadId = uint2(DispatchThreadId.x % THREADGROUPSIZE_X, DispatchThreadId.x / THREADGROUPSIZE_X);
     // RW_DebugView[GroupToDispatchThreadId] = RW_FilterResult[GroupToDispatchThreadId];
-    sharedMax[GroupThreadId.x] = RW_FilterResult[GroupToDispatchThreadId];
+    SharedMax[GroupThreadId.x] = RW_FilterResult[GroupToDispatchThreadId];
+    SharedMax[GroupThreadId.x] = RW_FilterResult[GroupToDispatchThreadId];
     // RW_DebugView[GroupToDispatchThreadId] = RW_SaveRotateScale[GroupToDispatchThreadId];
     GroupMemoryBarrierWithGroupSync(); 
     
@@ -489,15 +491,19 @@ void FindBestPixel(int3 DispatchThreadId, uint3 GroupThreadId, uint3 GroupId)
     {
         if (GroupThreadId.x < stride )
         {
-            float4 shareValue = sharedMax[GroupThreadId.x];
-            float4 CompareValue = sharedMax[GroupThreadId.x + stride];
-            if (shareValue.x < CompareValue.x)
+            float4 CompareValueA = SharedMax[GroupThreadId.x];
+            float4 CompareValueB = SharedMax[GroupThreadId.x + stride];
+            float GenerateCountA = CompareValueA.x;
+            float GenerateCountB = CompareValueB.x;
+            float UnGenerateCountA = CompareValueA.y;
+            float UnGenerateCountB = CompareValueB.y;
+            bool IsChange =
+                (GenerateCountA < GenerateCountB)
+                || (GenerateCountA == GenerateCountB && UnGenerateCountA > UnGenerateCountB)
+            ;
+            if (IsChange)
             {
-                sharedMax[GroupThreadId.x] = CompareValue;
-            }
-            if(shareValue.x == CompareValue.x && shareValue.y > CompareValue.y)
-            {
-                sharedMax[GroupThreadId.x] = CompareValue;
+                SharedMax[GroupThreadId.x] = CompareValueB;
             }
 
         }
@@ -506,41 +512,55 @@ void FindBestPixel(int3 DispatchThreadId, uint3 GroupThreadId, uint3 GroupId)
 
     if (GroupThreadId.x == 0) 
     {
-        RW_FindPixelBuffer[GroupId.x] = sharedMax[0];
+        RW_FindPixelBuffer[GroupId.x] = SharedMax[0];
     }
-    float4 MinValue = sharedMax[0];
+    float4 MinValue = SharedMax[0];
     
     
 
 }
 
-groupshared float4 sharedMaxRW[THREADGROUPSIZE_X]; // 共享内存加速访问
 
+groupshared half4 SharedMaxRW[THREADGROUPSIZE_X]; 
 void FindBestPixelInRW(int3 DispatchThreadId, uint3 GroupThreadId ,uint3 GroupId)
 {
-    
+
     uint index = GroupId.x * THREADGROUPSIZE_X + GroupThreadId.x;
     float MaxCell = 0;
     RW_FilterResult.GetDimensions(MaxCell, MaxCell);
 
     //uint2 GroupToDispatchThreadId = uint2(DispatchThreadId.x % THREADGROUPSIZE_X, DispatchThreadId.x / THREADGROUPSIZE_X);
-    sharedMaxRW[GroupThreadId.x] = RW_FindPixelBuffer[GroupThreadId.x];
+    SharedMaxRW[GroupThreadId.x] = RW_FindPixelBuffer[GroupThreadId.x];
     
-    GroupMemoryBarrierWithGroupSync(); // 同步线程组
+    GroupMemoryBarrierWithGroupSync(); 
 
-    // 归约：逐步折半比较最小值
+
     for (uint stride = THREADGROUPSIZE_X / 2; stride > 0; stride >>= 1)
     {
-        if (GroupThreadId.x < stride) {
-            sharedMaxRW[GroupThreadId.x] = sharedMaxRW[GroupThreadId.x].x > sharedMaxRW[GroupThreadId.x + stride].x ? sharedMaxRW[GroupThreadId.x] : sharedMaxRW[GroupThreadId.x + stride];
+        if (GroupThreadId.x < stride)
+        {
+            float4 CompareValueA = SharedMaxRW[GroupThreadId.x];
+            float4 CompareValueB = SharedMaxRW[GroupThreadId.x + stride];
+            float GenerateCountA = CompareValueA.x;
+            float GenerateCountB = CompareValueB.x;
+            float UnGenerateCountA = CompareValueA.y;
+            float UnGenerateCountB = CompareValueB.y;
+            bool IsChange =
+                (GenerateCountA < GenerateCountB)
+                || (GenerateCountA == GenerateCountB && UnGenerateCountA > UnGenerateCountB)
+            ;
+            if (IsChange)
+            {
+                SharedMaxRW[GroupThreadId.x] = CompareValueB;
+            }
         }
         GroupMemoryBarrierWithGroupSync();
     }
-    //RW_DebugView[uint2(GroupThreadId.x, GroupThreadId.x / MaxCell)] = sharedMaxRW[0];
+    //RW_DebugView[uint2(GroupThreadId.x, GroupThreadId.x / MaxCell)] = SharedMaxRW[0];
 
     if (GroupThreadId.x == 0) 
     {
-        float4 BestPixel = sharedMaxRW[0];
+        float4 BestPixel = SharedMaxRW[0];
 
         if(BestPixel.x < 2) return;
 
