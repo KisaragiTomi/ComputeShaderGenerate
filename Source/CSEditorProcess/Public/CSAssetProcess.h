@@ -14,9 +14,9 @@ class CSEDITORPROCESS_API UCSAssetProcess : public UBlueprintFunctionLibrary
 {
 	GENERATED_BODY()
 	UFUNCTION(BlueprintCallable, Category = "ComputeShader")
-	static void CaptureMeshHeight(ACSMeshConverter* InConverter, UTextureRenderTarget2D*& OutRenderTarget2D, TArray<AActor*>& OutActors, int32
+	static void CaptureMeshHeight(AStaticMeshActor* InMeshActor, UTextureRenderTarget2D*& OutRenderTarget2D, TArray<AActor*>& OutActors, int32
 	                              InTextureSize = 256);
 
 	UFUNCTION(BlueprintCallable, Category = "ComputeShader")
-	static void CalculateMeshHeight(ACSMeshConverter* InConverter, UTextureRenderTarget2D* NewRenderTarget2D);
+	static void CalculateMeshHeight(AStaticMeshActor* InMeshActor, UTextureRenderTarget2D* NewRenderTarget2D);
 };

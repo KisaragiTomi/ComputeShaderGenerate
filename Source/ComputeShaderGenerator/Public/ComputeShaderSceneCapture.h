@@ -71,6 +71,9 @@ public:
 	virtual void OnConstruction(const FTransform& Transform) override;
 	UFUNCTION(BlueprintCallable, Category = "ComputeShader")
 	void CaptureAll();
+
+	UFUNCTION(BlueprintCallable, Category = "ComputeShader")
+	void CaptureMeshsInBox();
 	
 	UFUNCTION(BlueprintCallable, Category = "ComputeShader")
 	bool CreateLandscapeMesh();
@@ -89,32 +92,6 @@ public:
 	FVector PreCenter = FVector::ZeroVector;
 	FVector PreExtent = FVector::ZeroVector;
 	
-};
-
-
-
-UCLASS()
-class COMPUTESHADERGENERATOR_API ACSMeshConverter : public AActor
-{
-	GENERATED_BODY()
-public:
-	ACSMeshConverter();
-
-	USceneComponent* SceneComponent;
-
-	
-	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Container")
-	UStaticMeshComponent* MeshVisualize;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Container")
-	UStaticMesh* MeshToCapture;
-	
-
-	
-	FVector Center = FVector::ZeroVector;
-	FVector Extent = FVector::ZeroVector;
-
-
-	virtual void OnConstruction(const FTransform& Transform) override;
 };
 
 UCLASS(BlueprintType)

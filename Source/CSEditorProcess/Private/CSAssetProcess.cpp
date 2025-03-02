@@ -35,10 +35,10 @@
 
 class FAssetRegistryModule;
 
-void UCSAssetProcess::CaptureMeshHeight(ACSMeshConverter* InConverter, UTextureRenderTarget2D*& OutRenderTarget2D, TArray<AActor*>& OutActors, int32 InTextureSize)
+void UCSAssetProcess::CaptureMeshHeight(AStaticMeshActor* InMeshActor, UTextureRenderTarget2D*& OutRenderTarget2D, TArray<AActor*>& OutActors, int32 InTextureSize)
 {
-	if (InConverter == nullptr) return;
-	UStaticMesh* ContainerMesh = InConverter->MeshToCapture;
+	if (InMeshActor == nullptr) return;
+	UStaticMesh* ContainerMesh = InMeshActor->GetStaticMeshComponent()->GetStaticMesh();
 	if (ContainerMesh == nullptr) return;
 
 	FBoxSphereBounds Bounds = ContainerMesh->GetBounds();
@@ -82,16 +82,16 @@ void UCSAssetProcess::CaptureMeshHeight(ACSMeshConverter* InConverter, UTextureR
 	OutActors.Add(CaptureTarget);
 }
 
-void UCSAssetProcess::CalculateMeshHeight(ACSMeshConverter* InConverter,  UTextureRenderTarget2D* NewRenderTarget2D)
+void UCSAssetProcess::CalculateMeshHeight(AStaticMeshActor* InMeshActor,  UTextureRenderTarget2D* NewRenderTarget2D)
 {
 	
 	float MaxHeight = 10000;
-	if (InConverter == nullptr || NewRenderTarget2D == nullptr) return;
-	UStaticMesh* ContainerMesh = InConverter->MeshToCapture; 
+	if (InMeshActor == nullptr || NewRenderTarget2D == nullptr) return;
+	UStaticMesh* ContainerMesh = InMeshActor->GetStaticMeshComponent()->GetStaticMesh(); 
 	if (ContainerMesh == nullptr) return;
 
 	FBoxSphereBounds Bounds = ContainerMesh->GetBounds();
-	ULevel* CurrentLevel = InConverter->GetLevel();
+	ULevel* CurrentLevel = InMeshActor->GetLevel();
 	FString LevelPathName = GetPathNameSafe(CurrentLevel);
 	FString FileName;
 	FString LevelPath;

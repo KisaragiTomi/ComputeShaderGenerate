@@ -16,10 +16,12 @@
 #include "Kismet/KismetRenderingLibrary.h"
 #include "ComputeShaderGeneral.h"
 #include "IAssetTools.h"
+#include "Landscape.h"
 #include "LandscapeExtra.h"
 #include "Engine/SceneCapture.h"
 #include "Engine/SceneCapture2D.h"
 #include "GeometryScript/MeshNormalsFunctions.h"
+#include "Kismet/KismetSystemLibrary.h"
 
 ACSGenerateCaptureScene::ACSGenerateCaptureScene()
 : Super()
@@ -55,7 +57,7 @@ ACSGenerateCaptureScene::ACSGenerateCaptureScene()
 	// CaptureObjectDepth->PrimitiveRenderMode = ESceneCapturePrimitiveRenderMode::PRM_UseShowOnlyList;
 	CaptureObjectDepth->CaptureSource = ESceneCaptureSource::SCS_SceneDepth;
 	CaptureObjectDepth->SetRelativeRotation(FRotator(-90, -90, 0));
-	CaptureObjectDepth->SetWorldLocation(FVector(0, 0, -MaxHeight * 3));
+	CaptureObjectDepth->SetWorldLocation(FVector(0, 0, MaxHeight));
 	CaptureObjectDepth->bCaptureEveryFrame = false;
 	CaptureObjectDepth->SetupAttachment(SceneComponent, TEXT("CaptureObjectDepth"));
 	
@@ -93,7 +95,7 @@ void ACSGenerateCaptureScene::OnConstruction(const FTransform& Transform)
 
 	//CaptureSceneDepth->SetRelativeLocation(FVector(0, 0, MaxHeight));
 	CaptureSceneDepth->SetRelativeLocation(FVector(0, 0, -MaxHeight));
-	CaptureObjectDepth->SetRelativeLocation(FVector(0, 0, -MaxHeight * 3));
+	CaptureObjectDepth->SetRelativeLocation(FVector(0, 0, MaxHeight));
 	CaptureSceneDepth->OrthoWidth = CaptureSize;
 	CaptureObjNormal->OrthoWidth = CaptureSize;
 	CaptureObjBaseColor->OrthoWidth = CaptureSize;
@@ -111,6 +113,33 @@ inline void ACSGenerateCaptureScene::CaptureAll()
 	if (CaptureObjNormal->TextureTarget != nullptr)		CaptureObjNormal->CaptureScene();
 	if (CaptureObjBaseColor->TextureTarget != nullptr)	CaptureObjBaseColor->CaptureScene();
 	if (CaptureObjectDepth->TextureTarget != nullptr)	CaptureObjectDepth->CaptureScene();
+}
+
+void ACSGenerateCaptureScene::CaptureMeshsInBox()
+{
+	// ALandscape* Landscape = nullptr;
+	// if (UWorld* World = GEngine->GetWorldFromContextObject(GWorld, EGetWorldErrorMode::LogAndReturnNull))
+	// {
+	// 	for (TActorIterator<ALandscape> It(World, ALandscape::StaticClass()); It; ++It)
+	// 	{
+	// 		Landscape = *It;
+	// 		break;
+	// 	}
+	// }
+	TArray<TEnumAsByte<EObjectTypeQuery>> ObjectTypes{ UEngineTypes::ConvertToObjectType(ECollisionChannel::ECC_WorldStatic) };
+	TArray<AActor*> ActorsToIgnore ;
+	// if (Landscape) ActorsToIgnore.Add(Landscape);
+	TArray<AActor*> OverlapOutActors;
+	UKismetSystemLibrary::ComponentOverlapActors(Box, Box->GetComponentTransform(), ObjectTypes, UStaticMesh::StaticClass(), ActorsToIgnore, OverlapOutActors);
+
+	CaptureObjectDepth->ShowOnlyActors = OverlapOutActors;
+	CaptureObjNormal->ShowOnlyActors = OverlapOutActors;
+	CaptureObjBaseColor->ShowOnlyActors = OverlapOutActors;
+	if (CaptureObjNormal->TextureTarget != nullptr)		CaptureObjNormal->CaptureScene();
+	if (CaptureObjBaseColor->TextureTarget != nullptr)	CaptureObjBaseColor->CaptureScene();
+	if (CaptureObjectDepth->TextureTarget != nullptr)	CaptureObjectDepth->CaptureScene();
+	if (CaptureSceneDepth->TextureTarget != nullptr)	CaptureSceneDepth->CaptureScene();
+	if (CaptureSceneNormal->TextureTarget != nullptr)	CaptureSceneNormal->CaptureScene();
 }
 
 bool ACSGenerateCaptureScene::CreateLandscapeMesh()
@@ -139,31 +168,4 @@ UTextureRenderTarget2D* ACSGenerateCaptureScene::CreateRenderTarget(float InText
 	NewRenderTarget2D->bCanCreateUAV = true;
 	NewRenderTarget2D->InitAutoFormat(InTextureSize, InTextureSize);
 	return NewRenderTarget2D;
-}
-
-ACSMeshConverter::ACSMeshConverter()
-{
-	SceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("CaptureRoot"));
-	SetRootComponent(SceneComponent);
-	
-	
-	// CaptureMeshDepth = CreateDefaultSubobject<USceneCaptureComponent2D>(TEXT("CaptureSceneDepth"));
-	// CaptureMeshDepth->OrthoWidth = 1024;
-	// CaptureMeshDepth->ProjectionType = ECameraProjectionMode::Orthographic;
-	// CaptureMeshDepth->CaptureSource = ESceneCaptureSource::SCS_SceneDepth;
-	// CaptureMeshDepth->SetRelativeRotation(FRotator(-90, -90, 0));
-	// CaptureMeshDepth->SetRelativeLocation(FVector(0, 0, 10000));
-	// CaptureMeshDepth->bCaptureEveryFrame = false;
-	// CaptureMeshDepth->SetupAttachment(SceneComponent, TEXT("CaptureSceneDepth"));
-
-	MeshVisualize = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("MeshVisualize"));
-	MeshVisualize->SetupAttachment(SceneComponent, TEXT("MeshVisualize"));
-}
-
-
-
-void ACSMeshConverter::OnConstruction(const FTransform& Transform)
-{
-	Super::OnConstruction(Transform);
-	
 }

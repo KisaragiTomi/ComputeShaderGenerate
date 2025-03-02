@@ -65,7 +65,7 @@ inline void ACSCliffGenerateCapture::GenerateCliffVertical(int32 NumIteration, f
 
 	{
 		SCOPE_CYCLE_COUNTER(STAT_CSCliffGenerate_Capture);
-		CaptureAll();
+		CaptureMeshsInBox();
 		FlushRenderingCommands();
 		GenerateTargetHeightCal();
 		FlushRenderingCommands();
@@ -117,7 +117,7 @@ inline void ACSCliffGenerateCapture::GenerateCliffVertical(int32 NumIteration, f
 		
 		FActorSpawnParameters SpawnParameters;
 		AStaticMeshActor *SpawnMesh = GWorld->SpawnActor<AStaticMeshActor>(SpawnParameters);
-		AStaticMeshActor *SpawnMeshCopy = GWorld->SpawnActor<AStaticMeshActor>(SpawnParameters);
+		// AStaticMeshActor *SpawnMeshCopy = GWorld->SpawnActor<AStaticMeshActor>(SpawnParameters);
 
 		float RandomRotate = FMath::RandRange(0, 1) * 180;
 		FVector SpawnLocation = FVector(LocationX * CaptureSize, LocationY * CaptureSize, LocationZ) + GetActorLocation() - FVector(1, 1, 0) * CaptureSize / 2;
@@ -129,9 +129,9 @@ inline void ACSCliffGenerateCapture::GenerateCliffVertical(int32 NumIteration, f
 		SpawnMesh->SetActorTransform(SpawnTransform);
 		SpawnMesh->GetStaticMeshComponent()->SetStaticMesh(GenerateStaticMesh);
 		SpawnTransform.SetLocation(FVector(SpawnTransform.GetLocation().X, SpawnTransform.GetLocation().Y, SpawnTransform.GetLocation().Z - MaxHeight * 4));
-		SpawnMeshCopy->SetActorTransform(SpawnTransform);
-		SpawnMeshCopy->GetStaticMeshComponent()->SetStaticMesh(GenerateStaticMesh);
-		SpawnMeshCopy->Tags = {Tag};
+		// SpawnMeshCopy->SetActorTransform(SpawnTransform);
+		// SpawnMeshCopy->GetStaticMeshComponent()->SetStaticMesh(GenerateStaticMesh);
+		// SpawnMeshCopy->Tags = {Tag};
 		SpawnMesh->Tags = {Tag};
 	}
 	
@@ -145,7 +145,7 @@ inline void ACSCliffGenerateCapture::GenerateCliffVertical(int32 NumIteration, f
 		}
 	}
 	CaptureObjNormal->ShowOnlyActors = StaticMeshActors;
-	CaptureAll();
+	CaptureMeshsInBox();
 }
 
 void ACSCliffGenerateCapture::GenerateTargetHeightCal()
