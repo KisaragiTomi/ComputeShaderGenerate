@@ -130,7 +130,7 @@ void ACSGenerateCaptureScene::CaptureMeshsInBox()
 	TArray<AActor*> ActorsToIgnore ;
 	// if (Landscape) ActorsToIgnore.Add(Landscape);
 	TArray<AActor*> OverlapOutActors;
-	UKismetSystemLibrary::ComponentOverlapActors(Box, Box->GetComponentTransform(), ObjectTypes, UStaticMesh::StaticClass(), ActorsToIgnore, OverlapOutActors);
+	UKismetSystemLibrary::ComponentOverlapActors(Box, Box->GetComponentTransform(), ObjectTypes, AStaticMeshActor::StaticClass(), ActorsToIgnore, OverlapOutActors);
 
 	CaptureObjectDepth->ShowOnlyActors = OverlapOutActors;
 	CaptureObjNormal->ShowOnlyActors = OverlapOutActors;
