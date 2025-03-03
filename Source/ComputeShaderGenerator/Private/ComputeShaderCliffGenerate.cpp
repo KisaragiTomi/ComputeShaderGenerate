@@ -182,10 +182,6 @@ void ACSCliffGenerateCapture::GenerateTargetHeightCal()
 			RDG_GPU_STAT_SCOPE(GraphBuilder, CSMeshFill);
 
 			TShaderMapRef<FMeshFillMult> ComputeShader_Init = FMeshFillMult::CreateMeshFillPermutation(FMeshFillMult::EMeshFillFunction::MF_Init);
-			TShaderMapRef<FMeshFillMult> ComputeShader_FVR = FMeshFillMult::CreateMeshFillPermutation(FMeshFillMult::EMeshFillFunction::MF_FillVerticalRock);
-			TShaderMapRef<FMeshFillMult> ComputeShader_FindPixel = FMeshFillMult::CreateMeshFillPermutation(FMeshFillMult::EMeshFillFunction::MF_FindBestPixel);
-			TShaderMapRef<FMeshFillMult> ComputeShader_FindPixelRW = FMeshFillMult::CreateMeshFillPermutation(FMeshFillMult::EMeshFillFunction::MF_FindBestPixelRW_256);
-			TShaderMapRef<FMeshFillMult> ComputeShader_Update = FMeshFillMult::CreateMeshFillPermutation(FMeshFillMult::EMeshFillFunction::MF_UpdateCurrentHeight);
 			TShaderMapRef<FMeshFillMult> ComputeShader_TargetHeight = FMeshFillMult::CreateMeshFillPermutation(FMeshFillMult::EMeshFillFunction::MF_TargetHeight);
 
 
@@ -198,9 +194,6 @@ void ACSCliffGenerateCapture::GenerateTargetHeightCal()
 			FRDGTextureRef TmpTexture_CurrentSceneDepth = ConvertToUVATextureFormat(GraphBuilder, CurrentSceneDepth, PF_FloatRGBA, TEXT("CurrentSceneDepth_Texture")); 
 			FRDGTextureUAVRef TmpTextureUAV_CurrentSceneDepth = GraphBuilder.CreateUAV(TmpTexture_CurrentSceneDepth);
 			
-			
-			FRDGTextureRef TmpTexture_FilterResult = ConvertToUVATextureFormat(GraphBuilder, SceneDepth, PF_A32B32G32R32F, TEXT("Result_Texture")); 
-			FRDGTextureUAVRef TmpTextureUAV_FilterResult = GraphBuilder.CreateUAV(TmpTexture_FilterResult);
 
 			FRDGTextureRef TmpTexture_TargetHeight = ConvertToUVATextureFormat(GraphBuilder, TargetHeight, PF_FloatRGBA, TEXT("TargetHeight_Texture"));
 			FRDGTextureUAVRef TmpTextureUAV_TargetHeight = GraphBuilder.CreateUAV(TmpTexture_TargetHeight);
@@ -225,7 +218,6 @@ void ACSCliffGenerateCapture::GenerateTargetHeightCal()
 			PassParameters->T_ObjectNormal = ObjectNormalTexture;
 			PassParameters->RW_CurrentSceneDepth = TmpTextureUAV_CurrentSceneDepth;
 			PassParameters->RW_DebugView = TmpTextureUAV_DebugView;
-			PassParameters->RW_FilterResult = TmpTextureUAV_FilterResult;
 			PassParameters->RW_TargetHeight = TmpTextureUAV_TargetHeight;
 			PassParameters->RW_TempA = TmpTextureUAV_A;
 			PassParameters->RW_TempB = TmpTextureUAV_B;
@@ -269,7 +261,7 @@ void ACSCliffGenerateCapture::GenerateTargetHeightCal()
 			AddCopyTexturePass(GraphBuilder, TmpTexture_A, TargetHeightTexture, FRHICopyTextureInfo());
 			
 			typename FBlurTexture::FPermutationDomain PermutationVector;
-			PermutationVector.Set<FBlurTexture::FBlurFunctionSet>(FBlurTexture::EBlurType::BT_BLUR3X3);
+			PermutationVector.Set<FBlurTexture::FBlurFunctionSet>(FBlurTexture::EBlurType::BT_BLUR15X15);
 			TShaderMapRef<FBlurTexture> ComputeShader_Blur(GetGlobalShaderMap(GMaxRHIFeatureLevel), PermutationVector);
 			
 			FBlurTexture::FParameters* BlurPassParameters = GraphBuilder.AllocParameters<FBlurTexture::FParameters>();
@@ -279,7 +271,7 @@ void ACSCliffGenerateCapture::GenerateTargetHeightCal()
 			BlurPassParameters->Sampler	= TStaticSamplerState<SF_Bilinear>::GetRHI();
 			BlurPassParameters->BlurScale = 1;
 			
-			for (int32 i = 0; i < 6; i++)
+			for (int32 i = 0; i < 1; i++)
 			{
 				GraphBuilder.AddPass(
 				RDG_EVENT_NAME("Blur"),

@@ -224,39 +224,39 @@ void GenerateTargetHeight(int3 DispatchThreadId, int3 GroupThreadId, int3 GroupI
     MaxCell -= 1;
     
     int PixelBoundSize = 1;
-    // 全局坐标
+   
     int2 globalPos = DispatchThreadId.xy;
     
     
-    // 加载主区域到共享内存
+  
      shareMhalf2[GroupThreadId.x + PixelBoundSize][GroupThreadId.y + PixelBoundSize] = T_TargetHeight[DispatchThreadId.xy].xy;
  
-    // 左边缘
+ 
     if (GroupThreadId.x < PixelBoundSize)
     {
         int2 FillPos = globalPos - int2(PixelBoundSize, 0);
         shareMhalf2[GroupThreadId.x][GroupThreadId.y + PixelBoundSize] = T_TargetHeight[clamp(FillPos, int2(0,0), MaxCell)].xy;
     }
-    // 右边缘
+       
     if (GroupThreadId.x >= THREADGROUPSIZE_X - PixelBoundSize)
     {
         int2 FillPos = globalPos + int2(PixelBoundSize, 0);
         shareMhalf2[GroupThreadId.x + PixelBoundSize * 2][GroupThreadId.y + PixelBoundSize] = T_TargetHeight[clamp(FillPos, int2(0,0), MaxCell)].xy;
     }
-    // 上边缘
+      
     if (GroupThreadId.y < PixelBoundSize)
     {
         int2 FillPos = globalPos - int2(0, PixelBoundSize);
         shareMhalf2[GroupThreadId.x + PixelBoundSize][GroupThreadId.y] = T_TargetHeight[clamp(FillPos, int2(0,0), MaxCell)].xy;
     }
-    // 下边缘
+     
     if (GroupThreadId.y >= THREADGROUPSIZE_X - PixelBoundSize)
     {
         int2 FillPos = globalPos + int2(0, PixelBoundSize);
         shareMhalf2[GroupThreadId.x + PixelBoundSize][GroupThreadId.y + PixelBoundSize * 2] = T_TargetHeight[clamp(FillPos, int2(0,0), MaxCell)].xy;
     }
 	
-    // 同步线程
+    
     GroupMemoryBarrierWithGroupSync();
     
     for (int i = 0; i < THREADGROUPSIZE_X * 2; i ++)
@@ -289,39 +289,35 @@ void ExtentGenerateMask(int3 DispatchThreadId, int3 GroupThreadId, int3 GroupID)
     
     int PixelBoundSize = EXTENTGENERATEMASK;
     int FindNum = PixelBoundSize * 2;
-    // 全局坐标
+   
     int2 globalPos = DispatchThreadId.xy;
 
     float4 CurrentSceneColor = T_CurrentSceneDepth[DispatchThreadId.xy];
-    // 加载主区域到共享内存
+  
      shareExtenthalf2[GroupThreadId.x + PixelBoundSize][GroupThreadId.y + PixelBoundSize] = half3(CurrentSceneColor.xz, FindNum);
  
-    // 左边缘
+ 
     if (GroupThreadId.x < PixelBoundSize)
     {
         int2 FillPos = globalPos - int2(PixelBoundSize, 0);
         shareExtenthalf2[GroupThreadId.x][GroupThreadId.y + PixelBoundSize] = half3(T_CurrentSceneDepth[clamp(FillPos, int2(0,0), MaxCell)].xz, FindNum);
     }
-    // 右边缘
     if (GroupThreadId.x >= THREADGROUPSIZE_X - PixelBoundSize)
     {
         int2 FillPos = globalPos + int2(PixelBoundSize, 0);
         shareExtenthalf2[GroupThreadId.x + PixelBoundSize * 2][GroupThreadId.y + PixelBoundSize] = half3(T_CurrentSceneDepth[clamp(FillPos, int2(0,0), MaxCell)].xz, FindNum);
     }
-    // 上边缘
     if (GroupThreadId.y < PixelBoundSize)
     {
         int2 FillPos = globalPos - int2(0, PixelBoundSize);
         shareExtenthalf2[GroupThreadId.x + PixelBoundSize][GroupThreadId.y] = half3(T_CurrentSceneDepth[clamp(FillPos, int2(0,0), MaxCell)].xz, FindNum);
     }
-    // 下边缘
     if (GroupThreadId.y >= THREADGROUPSIZE_X - PixelBoundSize)
     {
         int2 FillPos = globalPos + int2(0, PixelBoundSize);
         shareExtenthalf2[GroupThreadId.x + PixelBoundSize][GroupThreadId.y + PixelBoundSize * 2] = half3(T_CurrentSceneDepth[clamp(FillPos, int2(0,0), MaxCell)].xz, FindNum);
     }
-	
-    // 同步线程
+    
     GroupMemoryBarrierWithGroupSync();
     
     for (int i = 0; i < THREADGROUPSIZE_X * 2; i ++)
@@ -395,7 +391,7 @@ void MeshFillVerticalRock(int3 DispatchThreadId)
     float4 TargetHeightColor = T_TargetHeight[DispatchThreadId.xy];
     float Rotate = atan2(Dir.x, Dir.y) * 2 + RandomRotator;
     float TargetHeight = TargetHeightColor.x + HeightOffset;
-    float RootSceneHeight = TargetHeight.x;
+    // float RootSceneHeight = TargetHeight;
     float RootGenerateMask = RootSceneColor.z;
     float RootUnGenerateMask = RootSceneColor.y;
     
@@ -424,7 +420,7 @@ void MeshFillVerticalRock(int3 DispatchThreadId)
             BRANCH
             if (MeshHeightColor.x < 10 ) continue;
             
-            float MeshHeight =  MeshHeightColor.x + RootSceneHeight;
+            float MeshHeight =  MeshHeightColor.x + TargetHeight;
             VoidCount += 1;
 
             //Sample Scene Height
@@ -440,14 +436,18 @@ void MeshFillVerticalRock(int3 DispatchThreadId)
             if(TestUV.x > 1 || TestUV.y > 1 || TestUV.x < 0 || TestUV.y < 0) return;
             
             //CheckHeight
-            // if(RootSceneHeight > CurrentSceneHight && GenerateMask == 0) return;
+            // if(TargetHeight > CurrentSceneHight && GenerateMask == 0) return;
             // [branch]
-            // if(RootSceneHeight + MeshHeight.x > TargetHeight + 50 ) continue;
+            // if(TargetHeight + MeshHeight.x > TargetHeight + 50 ) continue;
             // RW_DebugView[uint2(MeshUV.x * 256, MeshUV.y * 256)] = 1;
             // RW_DebugView[uint2(TestUV.x * 256, TestUV.y * 256)] = 1;
             //CheckMask When the GenerateMask Count of two objects are equals, I need to consider UnGenerateMask Count
             UnGenerateMaskCount += UnGenerateMask > 0;
-            GenerateMaskCount += (GenerateMask > 0) && (UnGenerateMask == 0);
+            GenerateMaskCount +=
+                (GenerateMask > 0)
+            && (UnGenerateMask == 0)
+            && (MeshHeight > CurrentSceneHight)
+            ;
                 
         }
     }
@@ -458,7 +458,7 @@ void MeshFillVerticalRock(int3 DispatchThreadId)
     uint Number = DispatchThreadId.x + DispatchThreadId.y * MaxCell;
     float4 FilterResult = float4(GenerateMaskCount, UnGenerateMaskCount, DispatchThreadId.x, DispatchThreadId.y);
     RW_FilterResult[DispatchThreadId.xy] = FilterResult;
-    RW_SaveRotateScale[DispatchThreadId.xy] = float4(Rotate, Size, RootSceneHeight, SelectIndex);
+    RW_SaveRotateScale[DispatchThreadId.xy] = float4(Rotate, Size, TargetHeight, SelectIndex);
 
     
     RW_DebugView[DispatchThreadId.xy] = FilterResult / 100.0;
