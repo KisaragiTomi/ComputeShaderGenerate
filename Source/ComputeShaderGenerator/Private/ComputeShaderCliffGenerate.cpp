@@ -120,6 +120,7 @@ inline void ACSCliffGenerateCapture::GenerateCliffVertical(int32 NumIteration, f
 		// AStaticMeshActor *SpawnMeshCopy = GWorld->SpawnActor<AStaticMeshActor>(SpawnParameters);
 
 		float RandomRotate = FMath::RandRange(0, 1) * 180;
+		RandomRoation = 0;
 		FVector SpawnLocation = FVector(LocationX * CaptureSize, LocationY * CaptureSize, LocationZ) + GetActorLocation() - FVector(1, 1, 0) * CaptureSize / 2;
 		FRotator SpawnRotation = FRotator(0, FMath::RadiansToDegrees(ResultRotate) + RandomRotate, 0);
 		FVector SpawnScale = FVector::OneVector * ResultScale / MeshSize * CaptureSize;
