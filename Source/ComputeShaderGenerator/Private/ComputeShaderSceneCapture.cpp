@@ -54,7 +54,7 @@ ACSGenerateCaptureScene::ACSGenerateCaptureScene()
 	CaptureObjectDepth = CreateDefaultSubobject<USceneCaptureComponent2D>(TEXT("CaptureObjectDepth"));
 	CaptureObjectDepth->OrthoWidth = CaptureSize;
 	CaptureObjectDepth->ProjectionType = ECameraProjectionMode::Orthographic;
-	// CaptureObjectDepth->PrimitiveRenderMode = ESceneCapturePrimitiveRenderMode::PRM_UseShowOnlyList;
+	CaptureObjectDepth->PrimitiveRenderMode = ESceneCapturePrimitiveRenderMode::PRM_UseShowOnlyList;
 	CaptureObjectDepth->CaptureSource = ESceneCaptureSource::SCS_SceneDepth;
 	CaptureObjectDepth->SetRelativeRotation(FRotator(-90, -90, 0));
 	CaptureObjectDepth->SetWorldLocation(FVector(0, 0, MaxHeight));
@@ -64,7 +64,7 @@ ACSGenerateCaptureScene::ACSGenerateCaptureScene()
 	CaptureObjNormal = CreateDefaultSubobject<USceneCaptureComponent2D>(TEXT("CaptureObjNormal"));
 	CaptureObjNormal->OrthoWidth = CaptureSize;
 	CaptureObjNormal->ProjectionType = ECameraProjectionMode::Orthographic;
-	// CaptureObjNormal->PrimitiveRenderMode = ESceneCapturePrimitiveRenderMode::PRM_UseShowOnlyList;
+	CaptureObjNormal->PrimitiveRenderMode = ESceneCapturePrimitiveRenderMode::PRM_UseShowOnlyList;
 	CaptureObjNormal->CaptureSource = ESceneCaptureSource::SCS_Normal;
 	CaptureObjNormal->bCaptureEveryFrame = false;
 	CaptureObjNormal->SetupAttachment(CaptureObjectDepth, TEXT("CaptureObjNormal"));
@@ -72,7 +72,7 @@ ACSGenerateCaptureScene::ACSGenerateCaptureScene()
 	CaptureObjBaseColor = CreateDefaultSubobject<USceneCaptureComponent2D>(TEXT("CaptureObjBaseColor"));
 	CaptureObjBaseColor->OrthoWidth = CaptureSize;
 	CaptureObjBaseColor->ProjectionType = ECameraProjectionMode::Orthographic;
-	// CaptureObjBaseColor->PrimitiveRenderMode = ESceneCapturePrimitiveRenderMode::PRM_UseShowOnlyList;
+	CaptureObjBaseColor->PrimitiveRenderMode = ESceneCapturePrimitiveRenderMode::PRM_UseShowOnlyList;
 	CaptureObjBaseColor->CaptureSource = ESceneCaptureSource::SCS_BaseColor;
 	CaptureObjBaseColor->bCaptureEveryFrame = false;
 	CaptureObjBaseColor->SetupAttachment(CaptureObjectDepth, TEXT("CaptureObjBaseColor"));
