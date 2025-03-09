@@ -121,8 +121,9 @@ inline void ACSCliffGenerateCapture::GenerateCliffVertical(int32 NumIteration, f
 
 		float RandomRotate = FMath::RandRange(0, 1) * 180;
 		RandomRoation = 0;
+		float Rotate = FMath::RadiansToDegrees(ResultRotate);
 		FVector SpawnLocation = FVector(LocationX * CaptureSize, LocationY * CaptureSize, LocationZ) + GetActorLocation() - FVector(1, 1, 0) * CaptureSize / 2;
-		FRotator SpawnRotation = FRotator(0, FMath::RadiansToDegrees(ResultRotate) + RandomRotate, 0);
+		FRotator SpawnRotation = FRotator(0, Rotate, 0);
 		FVector SpawnScale = FVector::OneVector * ResultScale / MeshSize * CaptureSize;
 		
 		FTransform SpawnTransform(SpawnRotation, SpawnLocation, SpawnScale);
@@ -182,7 +183,7 @@ void ACSCliffGenerateCapture::GenerateTargetHeightCal()
 			RDG_EVENT_SCOPE(GraphBuilder, "CSMeshFill");
 			RDG_GPU_STAT_SCOPE(GraphBuilder, CSMeshFill);
 
-			TShaderMapRef<FMeshFillMult> ComputeShader_Init = FMeshFillMult::CreateMeshFillPermutation(FMeshFillMult::EMeshFillFunction::MF_Init);
+			TShaderMapRef<FMeshFillMult> ComputeShader_InitTargetHeight = FMeshFillMult::CreateMeshFillPermutation(FMeshFillMult::EMeshFillFunction::MF_InitTargetHeight);
 			TShaderMapRef<FMeshFillMult> ComputeShader_TargetHeight = FMeshFillMult::CreateMeshFillPermutation(FMeshFillMult::EMeshFillFunction::MF_TargetHeight);
 
 
@@ -228,9 +229,9 @@ void ACSCliffGenerateCapture::GenerateTargetHeightCal()
 				RDG_EVENT_NAME("MeshFillVerticalRock"),
 				PassParameters,
 				ERDGPassFlags::AsyncCompute,
-				[&PassParameters, ComputeShader_Init, GroupCount](FRHIComputeCommandList& RHICmdList)
+				[&PassParameters, ComputeShader_InitTargetHeight, GroupCount](FRHIComputeCommandList& RHICmdList)
 				{
-					FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader_Init, *PassParameters, GroupCount);
+					FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader_InitTargetHeight, *PassParameters, GroupCount);
 				});
 			AddCopyTexturePass(GraphBuilder, TmpTexture_CurrentSceneDepth, CurrentSceneDepthTexture, FRHICopyTextureInfo());
 			AddCopyTexturePass(GraphBuilder, TmpTexture_TargetHeight, TargetHeightTexture, FRHICopyTextureInfo());
@@ -304,11 +305,10 @@ void ACSCliffGenerateCapture::GenerateCliffVerticalCal(TArray<FCSCliffGenerateDa
 	InDebugView->ResizeTarget(TextureSize, TextureSize);
 	InCurrentSceneDepth->ResizeTarget(TextureSize, TextureSize);
 	
-	
 	//InConectivityClassifiy->ResizeTarget(TextureSize, TextureSize);
 	InTargetHeight->ResizeTarget(TextureSize, TextureSize);
 	int32 ResultSize = GenerateTextureSize(GenerateDatas.Num());
-	InResult->ResizeTarget(ResultSize, 2);
+	InResult->ResizeTarget(1024, 2);
 	
 	FRenderTarget* ObjectNormal = InObjectNormal->GameThread_GetRenderTargetResource();
 	FRenderTarget* SceneNormal = InSceneNormal->GameThread_GetRenderTargetResource();
@@ -338,8 +338,9 @@ void ACSCliffGenerateCapture::GenerateCliffVerticalCal(TArray<FCSCliffGenerateDa
 			DECLARE_GPU_STAT(CSMeshFill)
 			RDG_EVENT_SCOPE(GraphBuilder, "CSMeshFill");
 			RDG_GPU_STAT_SCOPE(GraphBuilder, CSMeshFill);
-
+			
 			TShaderMapRef<FMeshFillMult> ComputeShader_Init = FMeshFillMult::CreateMeshFillPermutation(FMeshFillMult::EMeshFillFunction::MF_Init);
+			TShaderMapRef<FMeshFillMult> ComputeShader_InitTargetHeight = FMeshFillMult::CreateMeshFillPermutation(FMeshFillMult::EMeshFillFunction::MF_InitTargetHeight);
 			TShaderMapRef<FMeshFillMult> ComputeShader_FVR = FMeshFillMult::CreateMeshFillPermutation(FMeshFillMult::EMeshFillFunction::MF_FillVerticalRock);
 			TShaderMapRef<FMeshFillMult> ComputeShader_FindPixel = FMeshFillMult::CreateMeshFillPermutation(FMeshFillMult::EMeshFillFunction::MF_FindBestPixel);
 			TShaderMapRef<FMeshFillMult> ComputeShader_FindPixelRW = FMeshFillMult::CreateMeshFillPermutation(FMeshFillMult::EMeshFillFunction::MF_FindBestPixelRW_256);
@@ -348,11 +349,13 @@ void ACSCliffGenerateCapture::GenerateCliffVerticalCal(TArray<FCSCliffGenerateDa
 			TShaderMapRef<FMeshFillMult> ComputeShader_FilterResultExtent = FMeshFillMult::CreateMeshFillPermutation(FMeshFillMult::EMeshFillFunction::MF_FilterResultExtent);
 			TShaderMapRef<FMeshFillMult> ComputeShader_FilterResultReduce = FMeshFillMult::CreateMeshFillPermutation(FMeshFillMult::EMeshFillFunction::MF_FilterResultReduce);
 			TShaderMapRef<FMeshFillMult> ComputeShader_Deduplication = FMeshFillMult::CreateMeshFillPermutation(FMeshFillMult::EMeshFillFunction::MF_Deduplication);
-			TShaderMapRef<FMeshFillMult> ComputeShader_FilterResultSelect = FMeshFillMult::CreateMeshFillPermutation(FMeshFillMult::EMeshFillFunction::MF_FilterResultSelect);
-
-
+			TShaderMapRef<FMeshFillMult> ComputeShader_UpdateCurrentHeightMult = FMeshFillMult::CreateMeshFillPermutation(FMeshFillMult::EMeshFillFunction::MF_UpdateCurrentHeightMult);
+			
+			FIntVector MeshCheckGroupCount = FComputeShaderUtils::GetGroupCount(FIntVector(SizeX, SizeY, 1), 16);
+			FIntVector GeneralGroupCount = FComputeShaderUtils::GetGroupCount(FIntVector(SizeX, SizeY, 1), 32);
 			FIntPoint TextureSizeXY = SceneDepth->GetSizeXY();
-			auto GroupCount = FComputeShaderUtils::GetGroupCount(FIntVector(SizeX, SizeY, 1), FComputeShaderUtils::kGolden2DGroupSize);
+			FIntPoint FilterResultSizeXY = FIntPoint(MeshCheckGroupCount.X, MeshCheckGroupCount.Y);
+			
 			FIntVector ReductionGroupSize = FIntVector(SizeX * SizeY / SHAREGROUP_FINDEXT_SIZE, 1, 1);
 			FMeshFillMult::FParameters* PassParameters = GraphBuilder.AllocParameters<FMeshFillMult::FParameters>();
 			
@@ -375,11 +378,12 @@ void ACSCliffGenerateCapture::GenerateCliffVerticalCal(TArray<FCSCliffGenerateDa
 			FRDGTextureRef TmpTexture_ResultB = ConvertToUVATextureFormat(GraphBuilder, Result, PF_A32B32G32R32F, TEXT("ResultB_Texture")); 
 			FRDGTextureUAVRef TmpTextureUAV_ResultB = GraphBuilder.CreateUAV(TmpTexture_ResultB);
 
-			FRDGTextureRef TmpTexture_FilterResult = ConvertToUVATextureFormat(GraphBuilder, TextureSizeXY, PF_A32B32G32R32F, TEXT("Result_Texture")); 
-			FRDGTextureUAVRef TmpTextureUAV_FilterResult = GraphBuilder.CreateUAV(TmpTexture_FilterResult);
-
+			
 			FRDGTextureRef TmpTexture_TargetHeight = ConvertToUVATextureFormat(GraphBuilder, TextureSizeXY, PF_FloatRGBA, TEXT("TargetHeight_Texture"));
 			FRDGTextureUAVRef TmpTextureUAV_TargetHeight = GraphBuilder.CreateUAV(TmpTexture_TargetHeight);
+			
+			FRDGTextureRef TmpTexture_FilterResult = ConvertToUVATextureFormat(GraphBuilder, FilterResultSizeXY, PF_A32B32G32R32F, TEXT("FilterResult_Texture")); 
+			FRDGTextureUAVRef TmpTextureUAV_FilterResult = GraphBuilder.CreateUAV(TmpTexture_FilterResult);
 
 			FRDGTextureRef TmpTexture_SaveRotateScale = ConvertToUVATextureFormat(GraphBuilder, TextureSizeXY, PF_FloatRGBA, TEXT("SaveRotateSacle_Texture"));
 			FRDGTextureUAVRef TmpTextureUAV_SaveRotateScale = GraphBuilder.CreateUAV(TmpTexture_SaveRotateScale);
@@ -445,33 +449,30 @@ void ACSCliffGenerateCapture::GenerateCliffVerticalCal(TArray<FCSCliffGenerateDa
 			PassParameters->RW_TargetHeight = TmpTextureUAV_TargetHeight;
 			PassParameters->RW_Deduplication = TmpTextureUAV_Deduplication;
 			PassParameters->RW_FilterResulteMult = TmpTextureUAV_FilterResulteMult;
-
 			PassParameters->RW_FindPixelBuffer = Tmp_CountBufferUAV;
 			PassParameters->RW_FindPixelBufferResult_Number = Tmp_FilterResult_Number_UAV;
 			PassParameters->RW_FindPixelBufferResult_NumberCount = Tmp_FilterResult_NumberCount_UAV;
-
-			
 			PassParameters->SelectIndex = -1;
-
 			PassParameters->Sampler	= TStaticSamplerState<SF_Bilinear>::GetRHI();
+			
 			
 			GraphBuilder.AddPass(
 				RDG_EVENT_NAME("Init"),
 				PassParameters,
 				ERDGPassFlags::AsyncCompute,
-				[&PassParameters, ComputeShader_Init, GroupCount](FRHIComputeCommandList& RHICmdList)
+				[&PassParameters, ComputeShader_Init, GeneralGroupCount](FRHIComputeCommandList& RHICmdList)
 				{
-					FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader_Init, *PassParameters, GroupCount);
+					FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader_Init, *PassParameters, GeneralGroupCount);
 				});
 			AddCopyTexturePass(GraphBuilder, TmpTexture_CurrentSceneDepth, CurrentSceneDepthTexture, FRHICopyTextureInfo());
-
+			
 			GraphBuilder.AddPass(
 				RDG_EVENT_NAME("ExtentNormalMask"),
 				PassParameters,
 				ERDGPassFlags::AsyncCompute,
-				[&PassParameters, ComputeShader_ExtentGenerateMask, GroupCount](FRHIComputeCommandList& RHICmdList)
+				[&PassParameters, ComputeShader_ExtentGenerateMask, GeneralGroupCount](FRHIComputeCommandList& RHICmdList)
 				{
-					FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader_ExtentGenerateMask, *PassParameters, GroupCount);
+					FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader_ExtentGenerateMask, *PassParameters, GeneralGroupCount);
 				});
 			AddCopyTexturePass(GraphBuilder, TmpTexture_CurrentSceneDepth, TmpTexture_CurrentSceneDepthA, FRHICopyTextureInfo());
 			
@@ -482,7 +483,7 @@ void ACSCliffGenerateCapture::GenerateCliffVerticalCal(TArray<FCSCliffGenerateDa
 					RDG_EVENT_NAME("MeshFillVerticalRock"),
 					PassParameters,
 					ERDGPassFlags::AsyncCompute,
-					[&PassParameters, ComputeShader_FVR, GroupCount, i, GenerateDatas, &MeshHeightTextures, this](FRHIComputeCommandList& RHICmdList)
+					[&PassParameters, ComputeShader_FVR, MeshCheckGroupCount, i, GenerateDatas, &MeshHeightTextures, this](FRHIComputeCommandList& RHICmdList)
 					{
 						float MeshSize = MeshDataAssets[GenerateDatas[i].SelectIndex]->CSMeshSize;
 						float DrawSize = MeshSize / CaptureSize * SpawnSize ;
@@ -492,24 +493,14 @@ void ACSCliffGenerateCapture::GenerateCliffVerticalCal(TArray<FCSCliffGenerateDa
 						PassParameters->SelectIndex = GenerateDatas[i].SelectIndex;
 
 						// PassParameters->T_TMeshDepth = MeshHeightTextures[GenerateDatas[i].SelectIndex];
-						FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader_FVR, *PassParameters, GroupCount);
-
-					});
-				
-				GraphBuilder.AddPass(
-					RDG_EVENT_NAME("FindBestPiexel"),
-					PassParameters,
-					ERDGPassFlags::AsyncCompute,
-					[&PassParameters, ComputeShader_FindPixel, ReductionGroupSize](FRHIComputeCommandList& RHICmdList)
-					{
-						FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader_FindPixel, *PassParameters, ReductionGroupSize);
+						FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader_FVR, *PassParameters, MeshCheckGroupCount);
 					});
 				
 				GraphBuilder.AddPass(
 					RDG_EVENT_NAME("FindBestPiexelRW"),
 					PassParameters,
 					ERDGPassFlags::AsyncCompute,
-					[&PassParameters, ComputeShader_FindPixelRW, i, TmpTextureUAV_ResultA, TmpTextureUAV_ResultB](FRHIComputeCommandList& RHICmdList)
+					[&PassParameters, ComputeShader_FindPixelRW, i, TmpTextureUAV_ResultA, TmpTextureUAV_ResultB, FilterResultSizeXY](FRHIComputeCommandList& RHICmdList)
 					{
 						FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader_FindPixelRW, *PassParameters, FIntVector(1, 1, 1));
 						if ( i % 2 == 0)
@@ -529,9 +520,9 @@ void ACSCliffGenerateCapture::GenerateCliffVerticalCal(TArray<FCSCliffGenerateDa
 					RDG_EVENT_NAME("Update"),
 					PassParameters,
 					ERDGPassFlags::AsyncCompute,
-					[&PassParameters, ComputeShader_Update, GroupCount, i, TmpTextureUAV_ResultA, TmpTextureUAV_ResultB, TmpTextureUAV_CurrentSceneDepthA, TmpTextureUAV_CurrentSceneDepthB](FRHIComputeCommandList& RHICmdList)
+					[&PassParameters, ComputeShader_UpdateCurrentHeightMult, GeneralGroupCount, i, TmpTextureUAV_ResultA, TmpTextureUAV_ResultB, TmpTextureUAV_CurrentSceneDepthA, TmpTextureUAV_CurrentSceneDepthB](FRHIComputeCommandList& RHICmdList)
 					{
-						FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader_Update, *PassParameters, GroupCount);
+						FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader_UpdateCurrentHeightMult, *PassParameters, GeneralGroupCount);
 						if ( i % 2 == 0)
 						{
 							PassParameters->RW_ResultA = TmpTextureUAV_ResultB;
@@ -547,57 +538,7 @@ void ACSCliffGenerateCapture::GenerateCliffVerticalCal(TArray<FCSCliffGenerateDa
 							PassParameters->RW_CurrentSceneDepthB = TmpTextureUAV_CurrentSceneDepthB;
 						}
 					});
-				// for(int32 n = 0; n < 4; n++)
-				// {
-				// 	GraphBuilder.AddPass(
-				// 		RDG_EVENT_NAME("FilterResultExtent"),
-				// 		PassParameters,
-				// 		ERDGPassFlags::AsyncCompute,
-				// 		[&PassParameters, ComputeShader_FilterResultExtent](FRHIComputeCommandList& RHICmdList)
-				// 		{
-				// 			FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader_FilterResultExtent, *PassParameters, FIntVector(256, 1, 1));
-				// 		});
-				// }
-				//
-				//
-				// GraphBuilder.AddPass(
-				// 	RDG_EVENT_NAME("FilterResultReduce"),
-				// 	PassParameters,
-				// 	ERDGPassFlags::AsyncCompute,
-				// 	[&PassParameters, ComputeShader_FilterResultReduce](FRHIComputeCommandList& RHICmdList)
-				// 	{
-				// 		FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader_FilterResultReduce, *PassParameters, FIntVector(256, 1, 1));
-				// 	});
-				// GraphBuilder.AddPass(
-				// 	RDG_EVENT_NAME("Deduplication"),
-				// 	PassParameters,
-				// 	ERDGPassFlags::AsyncCompute,
-				// 	[&PassParameters, ComputeShader_Deduplication](FRHIComputeCommandList& RHICmdList)
-				// 	{
-				// 		FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader_Deduplication, *PassParameters, FIntVector(256, 1, 1));
-				// 	});
-				// GraphBuilder.AddPass(
-				// 	RDG_EVENT_NAME("FilterResultSelect"),
-				// 	PassParameters,
-				// 	ERDGPassFlags::AsyncCompute,
-				// 	[&PassParameters, ComputeShader_FilterResultSelect, i, TmpTextureUAV_ResultB, TmpTextureUAV_ResultA, TmpTextureUAV_CurrentSceneDepthB, TmpTextureUAV_CurrentSceneDepthA](FRHIComputeCommandList& RHICmdList)
-				// 	{
-				// 		FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader_FilterResultSelect, *PassParameters, FIntVector(256, 1, 1));
-				// 		if ( i % 2 == 0)
-				// 		{
-				// 			PassParameters->RW_ResultA = TmpTextureUAV_ResultB;
-				// 			PassParameters->RW_ResultB = TmpTextureUAV_ResultA;
-				// 			PassParameters->RW_CurrentSceneDepthA = TmpTextureUAV_CurrentSceneDepthB;
-				// 			PassParameters->RW_CurrentSceneDepthB = TmpTextureUAV_CurrentSceneDepthA;
-				// 		}
-				// 		else
-				// 		{
-				// 			PassParameters->RW_ResultA = TmpTextureUAV_ResultA;
-				// 			PassParameters->RW_ResultB = TmpTextureUAV_ResultB;
-				// 			PassParameters->RW_CurrentSceneDepthA = TmpTextureUAV_CurrentSceneDepthA;
-				// 			PassParameters->RW_CurrentSceneDepthB = TmpTextureUAV_CurrentSceneDepthB;
-				// 		}
-				// 	});
+
 			}
 			if (GenerateDatas.Num() % 2 == 0)
 			{

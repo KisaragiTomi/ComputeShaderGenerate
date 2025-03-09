@@ -14,57 +14,12 @@
 #define NUM_THREADS_PER_GROUP_DIMENSION_X 32
 #define NUM_THREADS_PER_GROUP_DIMENSION_Y 32
 #define NUM_THREADS_PER_GROUP_DIMENSION_Z 1
+#define NUM_SAMPLE_MESH_THREADS_PER_GROUP_DIMENSION_X 16
+#define NUM_SAMPLE_MESH_THREADS_PER_GROUP_DIMENSION_Y 16
+#define NUM_SAMPLE_MESH_THREADS_PER_GROUP_DIMENSION_Z 1
 #define SHAREGROUP_FINDEXT_SIZE 256
 
-class FMeshFill : public FGlobalShader
-{
-public:
 
-	
-
-	//Declare this class as a global shader
-	DECLARE_GLOBAL_SHADER(FMeshFill);
-	//Tells the engine that this shader uses a structure for its parameters
-	SHADER_USE_PARAMETER_STRUCT(FMeshFill, FGlobalShader);
-	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
-		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, T_SceneDepth)
-		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, T_SceneNormal)
-		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, T_TMeshDepth)
-		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, T_CurrentSceneDepth)
-		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, RW_CurrentSceneDepth)
-		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, RW_DebugView)
-		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, RW_Result)
-		SHADER_PARAMETER(float, RandomRotator)
-		SHADER_PARAMETER(float, Size)
-		// SHADER_PARAMETER_UAV(RWBuffer<float4>, OutBounds)
-		// SHADER_PARAMETER_SRV(Buffer<float>, InParticleIndices)
-		SHADER_PARAMETER_SAMPLER(SamplerState, Sampler)
-	END_SHADER_PARAMETER_STRUCT()
-public:
-	//Called by the engine to determine which permutations to compile for this shader
-	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
-	{
-		
-
-		return true;
-	}
-	//Modifies the compilations environment of the shader
-	static inline void ModifyCompilationEnvironment(const FGlobalShaderPermutationParameters& Parameters, FShaderCompilerEnvironment& OutEnvironment)
-	{
-		FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
-
-		//We're using it here to add some preprocessor defines. That way we don't have to change both C++ and HLSL code 
-		// when we change the value for NUM_THREADS_PER_GROUP_DIMENSION
-	
-		OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_X"), NUM_THREADS_PER_GROUP_DIMENSION_X);
-		OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_Y"), NUM_THREADS_PER_GROUP_DIMENSION_Y);
-		OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_Z"), NUM_THREADS_PER_GROUP_DIMENSION_Z);
-
-		OutEnvironment.SetDefine(TEXT("MAX_HEIGHT"), 10000);
-	}
-};
-
-IMPLEMENT_GLOBAL_SHADER(FMeshFill, "/OoOShaders/MeshFill.usf", "MainComputeShader", SF_Compute);
 
 class FMeshFillMult : public FGlobalShader
 {
@@ -73,6 +28,7 @@ public:
 	enum class EMeshFillFunction : uint8
 	{
 		MF_Init,
+		MF_InitTargetHeight,
 		MF_General,
 		MF_FillVerticalRock,
 		MF_FillCappingRock,
@@ -85,7 +41,7 @@ public:
 		MF_FilterResultExtent,
 		MF_FilterResultReduce,
 		MF_Deduplication,
-		MF_FilterResultSelect,
+		MF_UpdateCurrentHeightMult,
 		MAX
 	};
 	class FMeshFillFunction : SHADER_PERMUTATION_ENUM_CLASS("FMESHFILL", EMeshFillFunction);
@@ -156,10 +112,11 @@ public:
 		OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_X"), NUM_THREADS_PER_GROUP_DIMENSION_X);
 		OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_Y"), NUM_THREADS_PER_GROUP_DIMENSION_Y);
 		OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_Z"), NUM_THREADS_PER_GROUP_DIMENSION_Z);
-
+		
 		static const TCHAR* ShaderSourceModeDefineName[] =
 		{
 			TEXT("FMESHFILL_INIT"),
+			TEXT("FMESHFILL_INITTARGETHEIGHT"),
 			TEXT("FMESHFILL_GENERAL"),
 			TEXT("FMESHFILL_FILLVERTICALROCK"),
 			TEXT("FMESHFILL_FILLCAPPINGROCK"),
@@ -172,7 +129,7 @@ public:
 			TEXT("FMESHFILL_FILTERRESULTEXTENT"),
 			TEXT("FMESHFILL_FILTERRESULTREDUCE"),
 			TEXT("FMESHFILL_DEDUPLICATION"),
-			TEXT("FMESHFILL_FILTERRESULTSELECT"),
+			TEXT("FMESHFILL_UPDATECURRENTHEIGHTMULT"),
 		}; 
 		static_assert(UE_ARRAY_COUNT(ShaderSourceModeDefineName) == (uint32)EMeshFillFunction::MAX, "Enum doesn't match define table.");
 
@@ -183,6 +140,11 @@ public:
 		OutEnvironment.SetDefine(TEXT("MAX_HEIGHT"), 10000);
 		//OutEnvironment.SetDefine(TEXT("FINDPIXELTHREADSIZE"), 256);
 
+		if (PermutationVector.Get<FMeshFillFunction>() == EMeshFillFunction::MF_FillVerticalRock)
+		{
+			OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_X"), NUM_SAMPLE_MESH_THREADS_PER_GROUP_DIMENSION_X);
+			OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_Y"), NUM_SAMPLE_MESH_THREADS_PER_GROUP_DIMENSION_Y);
+		}
 		if (PermutationVector.Get<FMeshFillFunction>() == EMeshFillFunction::MF_FindBestPixel)
 		{
 			OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_X"), SHAREGROUP_FINDEXT_SIZE);
@@ -195,13 +157,13 @@ public:
 		}
 		if (PermutationVector.Get<FMeshFillFunction>() == EMeshFillFunction::MF_FindBestPixelRW_256)
 		{
-			OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_X"), 256 * 256 / SHAREGROUP_FINDEXT_SIZE);
-			OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_Y"), 1);
+			OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_X"), 16);
+			OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_Y"), 16);
 		}
-		// if (PermutationVector.Get<FMeshFillFunction>() == EMeshFillFunction::MF_ExtentGenerateMask)
-		// {
-		// 	OutEnvironment.SetDefine(TEXT("EXTENTSIZE"), 3);
-		// }
+		if (PermutationVector.Get<FMeshFillFunction>() == EMeshFillFunction::MF_UpdateCurrentHeightMult)
+		{
+			OutEnvironment.SetDefine(TEXT("SHARETEXTURESIZE"), 32);
+		}
 	}
 };
 
@@ -249,9 +211,9 @@ UCLASS()
 class COMPUTESHADERGENERATOR_API UComputeShaderMeshFillFunctions : public UBlueprintFunctionLibrary
 {
 	GENERATED_BODY()
-	UFUNCTION(BlueprintCallable, Category = "ComputeShader")
-	static void CSMeshFill(ACSGenerateCaptureScene* Capturer, UStaticMesh* StaticMesh, UTextureRenderTarget2D* DubugView, UTextureRenderTarget2D*
-	                       Result, UTexture2D* TMeshDepth, float SpawnSize = 1, float TestSizeScale = 1, FName Tag = FName(TEXT("Auto")));
+	// UFUNCTION(BlueprintCallable, Category = "ComputeShader")
+	// static void CSMeshFill(ACSGenerateCaptureScene* Capturer, UStaticMesh* StaticMesh, UTextureRenderTarget2D* DubugView, UTextureRenderTarget2D*
+	//                        Result, UTexture2D* TMeshDepth, float SpawnSize = 1, float TestSizeScale = 1, FName Tag = FName(TEXT("Auto")));
 
 	UFUNCTION(BlueprintCallable, Category = "ComputeShader")
 	static void CSMeshFillMult(ACSGenerateCaptureScene* Capturer, UStaticMesh* StaticMesh, UTextureRenderTarget2D* DubugView, UTextureRenderTarget2D*
@@ -259,8 +221,8 @@ class COMPUTESHADERGENERATOR_API UComputeShaderMeshFillFunctions : public UBluep
 	                           TestSizeScale = 1, FName Tag = FName(TEXT("Auto")));
 
 	
-	UFUNCTION(BlueprintCallable, Category = "ComputeShader")
-	static void CalculateMeshLoctionAndRotation(FCSGenerateParameter Params);
+	// UFUNCTION(BlueprintCallable, Category = "ComputeShader")
+	// static void CalculateMeshLoctionAndRotation(FCSGenerateParameter Params);
 
 	UFUNCTION(BlueprintCallable, Category = "ComputeShader")
 	static void CalculateMeshLoctionAndRotationMult(FCSGenerateParameter Params, int32 NumIteraion);

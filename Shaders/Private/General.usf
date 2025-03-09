@@ -173,10 +173,10 @@ float4 SampleBilinear(RWTexture2D<float4> _SourceTexture, uint _SourceTextureSiz
     x1y1 = clamp(x1y1, int2(0, 0), _SourceTextureSize - 1);
 
     // 采样四个像素
-    float4 p00 = _SourceTexture.Load(int3(x0y0, 0));
-    float4 p10 = _SourceTexture.Load(int3(x1y0, 0));
-    float4 p01 = _SourceTexture.Load(int3(x0y1, 0));
-    float4 p11 = _SourceTexture.Load(int3(x1y1, 0));
+    float4 p00 = _SourceTexture[x0y0];
+    float4 p10 = _SourceTexture[x1y0];
+    float4 p01 = _SourceTexture[x0y1];
+    float4 p11 = _SourceTexture[x1y1];
 
     // 计算插值权重
     float2 weight = frac(coord);

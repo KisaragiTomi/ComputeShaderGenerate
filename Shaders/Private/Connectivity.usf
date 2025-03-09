@@ -106,7 +106,7 @@ void CPF_Init(uint3 DispatchThreadId)
 	// uint currentLabel = RW_LabelBufferA[DispatchThreadId.xy];
 	
 }
-void CPF_Findislands(int3 DispatchThreadId, int3 GroupThreadId, int3 GroupId)
+void CPF_Findislands(uint3 DispatchThreadId, uint3 GroupThreadId, uint3 GroupID)
 {
 	float4 currentLabel = RW_LabelBufferA[DispatchThreadId.xy];
 	if (currentLabel.x == 0) return;
@@ -139,7 +139,7 @@ void CPF_Findislands(int3 DispatchThreadId, int3 GroupThreadId, int3 GroupId)
 
 groupshared float ShareFind [THREADGROUPSIZE_X + 2][THREADGROUPSIZE_X + 2];
 
-void CPF_FindislandsFast(int3 DispatchThreadId, int3 GroupThreadId, int3 GroupId)
+void CPF_FindislandsFast(uint3 DispatchThreadId, uint3 GroupThreadId, uint3 GroupID)
 {
 	
 	float4 currentLabel = RW_LabelBufferA[DispatchThreadId.xy];
@@ -225,7 +225,7 @@ void CPF_Count(uint3 DispatchThreadId)
 
 groupshared float2 ShareCount [THREADGROUPSIZE_X];
 
-void CPF_CountReduction(int3 DispatchThreadId, int3 GroupThreadId, int3 GroupId)
+void CPF_CountReduction(uint3 DispatchThreadId, uint3 GroupThreadId, uint3 GroupID)
 {
 	
 	uint index = GroupId.x * 256 + GroupThreadId.x;
