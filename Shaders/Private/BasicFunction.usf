@@ -11,6 +11,9 @@
 #define THREADGROUPSIZE_Y 32
 #endif
 
+#ifndef EXTENTGENERATEMASK
+#define EXTENTGENERATEMASK 1
+#endif
 
 SamplerState Sampler;
 
@@ -222,33 +225,205 @@ void UpPixel(
   
 }
 
-Texture2D T_ProcssTexture;
-Texture2DArray<float4> TA_ProcssTexture;
-RWTexture2D<float4> RW_ProcssTexture;
-// RWTexture2D<float4> RW_DebugView;
-float InputData;
+Texture2D T_ProcssTexture0;
+Texture2DArray<float4> TA_ProcssTexture0;
+RWTexture2D<float4> RW_ProcssTexture0;
+RWTexture2D<float4> RW_DebugView;
+uint InputIntData0;
+uint InputIntData1;
+float InputData0;
+float3 InputVectorData0;
+float3 InputVectorData1;
 
 void ProcessHeightTexture(uint3 DispatchThreadId)
 {
-	RW_ProcssTexture[DispatchThreadId.xy].x = min(InputData - T_ProcssTexture[DispatchThreadId.xy].x, InputData);
-	// RW_ProcssTexture[DispatchThreadId.xy] = 1;
+	RW_ProcssTexture0[DispatchThreadId.xy].x = min(InputData0 - T_ProcssTexture0[DispatchThreadId.xy].x, InputData0);
+	// RW_ProcssTexture0[DispatchThreadId.xy] = 1;
 }
 
 void TextureArrayTest(uint3 DispatchThreadId)
 {
 	
-	RW_ProcssTexture[DispatchThreadId.xy].x = TA_ProcssTexture[DispatchThreadId];
+	RW_ProcssTexture0[DispatchThreadId.xy].x = TA_ProcssTexture0[DispatchThreadId].x;
+}
+
+
+void SampleHeihgtData(uint3 DispatchThreadId)
+{
+	float MaxCell = 0;
+	RW_ProcssTexture0.GetDimensions(MaxCell, MaxCell);
+	float2 SampleUV = (DispatchThreadId.xy + .5) / (MaxCell - 0);
+	// vector Range = HeightDataSizeMax - HeightDataSizeMin;
+	// vector MinUV = (TextureSizeMin - HeightDataSizeMin) / Range;
+	// vector MaxUV = (TextureSizeMax - HeightDataSizeMax) / Range;
+	// vector UVRange = MaxUV - MinUV;
+	SampleUV *= InputVectorData0.xy;
+	SampleUV += InputVectorData1.xy;
+	
+	RW_ProcssTexture0[DispatchThreadId.xy] = T_ProcssTexture0.SampleLevel(Sampler, SampleUV, 0);
+	// RW_ProcssTexture0[DispatchThreadId.xy] = 1;
+}
+
+groupshared half2 ShareExtenthalf2[THREADGROUPSIZE_X + EXTENTGENERATEMASK * 2][THREADGROUPSIZE_Y + EXTENTGENERATEMASK * 2];
+void ExtentMask(uint3 DispatchThreadId, uint3 GroupThreadId, uint3 GroupID, uint NumExtend)
+{
+    float MaxCell;
+    T_ProcssTexture0.GetDimensions(MaxCell, MaxCell);
+    MaxCell -= 1;
+    
+    int PixelBoundSize = NumExtend;
+    int FindNum = PixelBoundSize * 2;
+
+	uint Channel = InputIntData0;
+    int2 globalPos = DispatchThreadId.xy;
+    float4 CurrentColor = T_ProcssTexture0[DispatchThreadId.xy];
+    ShareExtenthalf2[GroupThreadId.x + PixelBoundSize][GroupThreadId.y + PixelBoundSize] = half2(CurrentColor[Channel], FindNum);
+	
+	
+    if (GroupThreadId.x < PixelBoundSize)
+    {
+        int2 FillPos = globalPos - int2(PixelBoundSize, 0);
+        ShareExtenthalf2[GroupThreadId.x][GroupThreadId.y + PixelBoundSize] = half2(T_ProcssTexture0[clamp(FillPos, int2(0,0), MaxCell)][Channel], FindNum);
+    }
+    if (GroupThreadId.x >= THREADGROUPSIZE_X - PixelBoundSize)
+    {
+        int2 FillPos = globalPos + int2(PixelBoundSize, 0);
+        ShareExtenthalf2[GroupThreadId.x + PixelBoundSize * 2][GroupThreadId.y + PixelBoundSize] = half2(T_ProcssTexture0[clamp(FillPos, int2(0,0), MaxCell)][Channel], FindNum);
+    }
+    if (GroupThreadId.y < PixelBoundSize)
+    {
+        int2 FillPos = globalPos - int2(0, PixelBoundSize);
+        ShareExtenthalf2[GroupThreadId.x + PixelBoundSize][GroupThreadId.y] = half2(T_ProcssTexture0[clamp(FillPos, int2(0,0), MaxCell)][Channel], FindNum);
+    }
+    if (GroupThreadId.y >= THREADGROUPSIZE_X - PixelBoundSize)
+    {
+        int2 FillPos = globalPos + int2(0, PixelBoundSize);
+        ShareExtenthalf2[GroupThreadId.x + PixelBoundSize][GroupThreadId.y + PixelBoundSize * 2] = half2(T_ProcssTexture0[clamp(FillPos, int2(0,0), MaxCell)][Channel], FindNum);
+    }
+    
+    GroupMemoryBarrierWithGroupSync();
+    
+    for (int i = 0; i < THREADGROUPSIZE_X * 2; i ++)
+    {
+        half2 CurrentShareColor = ShareExtenthalf2[GroupThreadId.x + PixelBoundSize][GroupThreadId.y + PixelBoundSize];
+    	float CurrentMaskValue = CurrentShareColor.x;
+    	float CurrentFindNum = CurrentShareColor.y;
+        if (CurrentMaskValue > 0 || CurrentFindNum <= 0) continue; 
+        for (int n = 0; n < 4; n++)
+        {
+            uint2 Offset = GroupThreadId.xy + PixelBoundSize + NeighbourOffset[n];
+            half2 ShareResult = ShareExtenthalf2[Offset.x][Offset.y];
+        	float MaskValue = ShareResult.x;
+        	float FindNum = ShareResult.y;
+        	bool Change = false;
+            if ( MaskValue > 0 && FindNum > 0)
+            {
+                ShareResult.y -= 1;
+                ShareExtenthalf2[GroupThreadId.x + PixelBoundSize][GroupThreadId.y + PixelBoundSize]= ShareResult;
+            }
+        }
+        GroupMemoryBarrierWithGroupSync();
+    }
+    
+    RW_ProcssTexture0[DispatchThreadId.xy][Channel] = ShareExtenthalf2[GroupThreadId.x + PixelBoundSize][GroupThreadId.y + PixelBoundSize].x;
+}
+
+groupshared half ShareExtentFasthalf[64][64];
+void ExtentMaskFast(uint3 DispatchThreadId, uint3 GroupThreadId, uint3 GroupID)
+{
+    float MaxCell;
+    T_ProcssTexture0.GetDimensions(MaxCell, MaxCell);
+    MaxCell -= 1;
+ 
+	int Channel = InputIntData0;
+	int NumExtend = min(16, InputIntData1);
+    int PixelBoundSize = 16;
+	
+    int2 globalPos = DispatchThreadId.xy;
+    float4 CurrentColor = T_ProcssTexture0[DispatchThreadId.xy];
+    ShareExtentFasthalf[GroupThreadId.x + PixelBoundSize][GroupThreadId.y + PixelBoundSize] = CurrentColor[Channel];
+	RW_ProcssTexture0[DispatchThreadId.xy] = CurrentColor;
+	
+    if (GroupThreadId.x < PixelBoundSize)
+    {
+        int2 FillPos = globalPos - int2(PixelBoundSize, 0);
+        ShareExtentFasthalf[GroupThreadId.x][GroupThreadId.y + PixelBoundSize] = T_ProcssTexture0[clamp(FillPos, int2(0,0), MaxCell)][Channel];
+    }
+    if (GroupThreadId.x >= THREADGROUPSIZE_X - PixelBoundSize)
+    {
+        int2 FillPos = globalPos + int2(PixelBoundSize, 0);
+        ShareExtentFasthalf[GroupThreadId.x + PixelBoundSize * 2][GroupThreadId.y + PixelBoundSize] = T_ProcssTexture0[clamp(FillPos, int2(0,0), MaxCell)][Channel];
+    }
+    if (GroupThreadId.y < PixelBoundSize)
+    {
+        int2 FillPos = globalPos - int2(0, PixelBoundSize);
+        ShareExtentFasthalf[GroupThreadId.x + PixelBoundSize][GroupThreadId.y] = T_ProcssTexture0[clamp(FillPos, int2(0,0), MaxCell)][Channel];
+    }
+    if (GroupThreadId.y >= THREADGROUPSIZE_X - PixelBoundSize)
+    {
+        int2 FillPos = globalPos + int2(0, PixelBoundSize);
+        ShareExtentFasthalf[GroupThreadId.x + PixelBoundSize][GroupThreadId.y + PixelBoundSize * 2] = T_ProcssTexture0[clamp(FillPos, int2(0,0), MaxCell)][Channel];
+    }
+
+	if (GroupThreadId.x < PixelBoundSize && GroupThreadId.y < PixelBoundSize)
+	{
+		int2 pos = globalPos + int2(-PixelBoundSize, -PixelBoundSize);
+		ShareExtentFasthalf[GroupThreadId.x][GroupThreadId.y] = T_ProcssTexture0[clamp(pos, int2(0,0), MaxCell)][Channel];
+	}
+	if (GroupThreadId.x < PixelBoundSize && GroupThreadId.y >= THREADGROUPSIZE_X - PixelBoundSize)
+	{
+		int2 pos = globalPos + int2(-PixelBoundSize, PixelBoundSize);
+		ShareExtentFasthalf[GroupThreadId.x][GroupThreadId.y + PixelBoundSize * 2] = T_ProcssTexture0[clamp(pos, int2(0,0), MaxCell)][Channel];
+	}
+	if (GroupThreadId.x >= THREADGROUPSIZE_X - PixelBoundSize && GroupThreadId.y >= THREADGROUPSIZE_X - PixelBoundSize)
+	{
+		int2 pos = globalPos + int2(PixelBoundSize, PixelBoundSize);
+		ShareExtentFasthalf[GroupThreadId.x + PixelBoundSize * 2][GroupThreadId.y + PixelBoundSize * 2] = T_ProcssTexture0[clamp(pos, int2(0,0), MaxCell)][Channel];
+	}
+	if (GroupThreadId.x >= THREADGROUPSIZE_X - PixelBoundSize && GroupThreadId.y < PixelBoundSize)
+	{
+		int2 pos = globalPos + int2(PixelBoundSize, -PixelBoundSize);
+		ShareExtentFasthalf[GroupThreadId.x + PixelBoundSize * 2][GroupThreadId.y] = T_ProcssTexture0[clamp(pos, int2(0,0), MaxCell)][Channel];
+	}
+	
+    GroupMemoryBarrierWithGroupSync();
+ 
+	float CurrentDist = 99999999;
+	uint2 CurrentOffset = uint2(GroupThreadId.x + PixelBoundSize, GroupThreadId.y + PixelBoundSize);
+	half CurrentShareColor = ShareExtentFasthalf[CurrentOffset.x][CurrentOffset.y];
+	bool IsChange = false;
+    for (int Y = -NumExtend; Y <= NumExtend; Y++ )
+    {
+    	for (int X = -NumExtend; X <= NumExtend; X++ )
+    	{
+    		uint2 Offset = CurrentOffset.xy + int2(X, Y);
+    		half ShareColor = ShareExtentFasthalf[Offset.x][Offset.y];
+			float Dist = distance(CurrentOffset, Offset);
+    		IsChange = ShareColor > 0 && Dist < CurrentDist;
+			CurrentDist = IsChange ? Dist : CurrentDist;
+    		CurrentShareColor = IsChange ? ShareColor : CurrentShareColor;
+    		
+    	}
+    }
+    RW_ProcssTexture0[DispatchThreadId.xy][Channel] = CurrentShareColor;
 }
 
 [numthreads(THREADGROUPSIZE_X, THREADGROUPSIZE_Y, THREADGROUPSIZE_Z)]
-void TempFunction(
-					   uint3 DispatchThreadId : SV_DispatchThreadID,
-					   uint GroupIndex : SV_GroupIndex)
+void GeneralFunctionSet(
+						uint3 GroupId : SV_GroupID,
+						uint3 DispatchThreadId : SV_DispatchThreadID,
+						uint3 GroupThreadId : SV_GroupThreadID,
+						uint GroupIndex : SV_GroupIndex) 
 {
 #if GTS_PROCESSMESHHEIGHTTEXTURE
 	ProcessHeightTexture(DispatchThreadId);
 #elif GTS_TEXTUREARRAYTEST
 	TextureArrayTest(DispatchThreadId);
+#elif GTS_CONVERTHEIGHTDATATEXTURE
+	SampleHeihgtData(DispatchThreadId);
+#elif GTS_MASKEXTENDFAST
+	ExtentMaskFast(DispatchThreadId, GroupThreadId, GroupId);
+
 #endif
-	
+
 }

@@ -108,17 +108,17 @@ void UCSAssetProcess::CalculateMeshHeight(AStaticMeshActor* InMeshActor,  UTextu
 	{
 		FRDGBuilder GraphBuilder(RHICmdList);
 		{
-			TShaderMapRef<FGeneralTempShader> ComputeShader = FGeneralTempShader::CreateTempShaderPermutation(FGeneralTempShader::ETempShader::GTS_ProcessMeshHeightTexture);
+			TShaderMapRef<FGeneralFunctionShader> ComputeShader = FGeneralFunctionShader::CreateTempShaderPermutation(FGeneralFunctionShader::ETempShader::GTS_ProcessMeshHeightTexture);
 
-			FGeneralTempShader::FParameters* PassParameters = GraphBuilder.AllocParameters<FGeneralTempShader::FParameters>();
+			FGeneralFunctionShader::FParameters* PassParameters = GraphBuilder.AllocParameters<FGeneralFunctionShader::FParameters>();
 			auto GroupCount = FComputeShaderUtils::GetGroupCount(FIntVector(NewTextureTarget->GetSizeXY().X, NewTextureTarget->GetSizeXY().Y, 1), FComputeShaderUtils::kGolden2DGroupSize);
 			
 			FRDGTextureRef TmpTexture_ProcssTexture = CSHepler::ConvertToUVATexture(NewTextureTarget, GraphBuilder);
 			FRDGTextureRef ProcssTexture = RegisterExternalTexture(GraphBuilder, NewTextureTarget->GetRenderTargetTexture(), TEXT("Input_RT"));
 			
-			PassParameters->T_ProcssTexture = ProcssTexture;
-			PassParameters->RW_ProcssTexture = GraphBuilder.CreateUAV(TmpTexture_ProcssTexture);
-			PassParameters->InputData = MaxHeight;
+			PassParameters->T_ProcssTexture0 = ProcssTexture;
+			PassParameters->RW_ProcssTexture0 = GraphBuilder.CreateUAV(TmpTexture_ProcssTexture);
+			PassParameters->InputData0 = MaxHeight;
 			PassParameters->Sampler	= TStaticSamplerState<SF_Bilinear>::GetRHI();
 
 			

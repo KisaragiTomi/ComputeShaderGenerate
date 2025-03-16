@@ -43,6 +43,14 @@ inline void ACSCliffGenerateCapture::GenerateCliffVertical(int32 NumIteration, f
 	SCOPE_CYCLE_COUNTER(STAT_CSCliffGenerate_Tatal);
 	if (!IsParameterValidMult()) return;
 
+	InObjectDepth->ResizeTarget(TextureSize, TextureSize);
+	InObjectNormal->ResizeTarget(TextureSize, TextureSize);
+	InSceneNormal->ResizeTarget(TextureSize, TextureSize);
+	InSceneDepth->ResizeTarget(TextureSize, TextureSize);
+	InDebugView->ResizeTarget(TextureSize, TextureSize);
+	InCurrentSceneDepth->ResizeTarget(TextureSize, TextureSize);
+	InHeightNormal->ResizeTarget(TextureSize, TextureSize);
+	InTargetHeight->ResizeTarget(TextureSize, TextureSize);
 
 	SpawnSize = InSpawnSize;
 	TArray<FCSCliffGenerateData> GenerateDatas;
@@ -66,6 +74,7 @@ inline void ACSCliffGenerateCapture::GenerateCliffVertical(int32 NumIteration, f
 	{
 		SCOPE_CYCLE_COUNTER(STAT_CSCliffGenerate_Capture);
 		CaptureMeshsInBox();
+		UComputeShaderBasicFunction::ConvertHeightDataToTexture(InHeightNormal, InHeightData, Box->Bounds.Origin, Box->Bounds.BoxExtent);
 		FlushRenderingCommands();
 		GenerateTargetHeightCal();
 		FlushRenderingCommands();
@@ -122,7 +131,7 @@ inline void ACSCliffGenerateCapture::GenerateCliffVertical(int32 NumIteration, f
 		float RandomRotate = FMath::RandRange(0, 1) * 180;
 		RandomRoation = 0;
 		float Rotate = FMath::RadiansToDegrees(ResultRotate);
-		FVector SpawnLocation = FVector(LocationX * CaptureSize, LocationY * CaptureSize, LocationZ) + GetActorLocation() - FVector(1, 1, 0) * CaptureSize / 2;
+		FVector SpawnLocation = FVector(LocationX * CaptureSize, LocationY * CaptureSize, LocationZ) - FVector(1, 1, 0) * (CaptureSize / 2 * FVector::OneVector - GetActorLocation());
 		FRotator SpawnRotation = FRotator(0, Rotate, 0);
 		FVector SpawnScale = FVector::OneVector * ResultScale / MeshSize * CaptureSize;
 		
@@ -155,14 +164,7 @@ void ACSCliffGenerateCapture::GenerateTargetHeightCal()
 
 	if (!IsParameterValidMult()) return;
 
-	InObjectDepth->ResizeTarget(TextureSize, TextureSize);
-	InObjectNormal->ResizeTarget(TextureSize, TextureSize);
-	InSceneNormal->ResizeTarget(TextureSize, TextureSize);
-	InSceneDepth->ResizeTarget(TextureSize, TextureSize);
-	InDebugView->ResizeTarget(TextureSize, TextureSize);
-	InCurrentSceneDepth->ResizeTarget(TextureSize, TextureSize);
-	
-	InTargetHeight->ResizeTarget(TextureSize, TextureSize);
+
 
 	FRenderTarget* ObjectNormal = InObjectNormal->GameThread_GetRenderTargetResource();
 	FRenderTarget* SceneNormal = InSceneNormal->GameThread_GetRenderTargetResource();
@@ -171,6 +173,7 @@ void ACSCliffGenerateCapture::GenerateTargetHeightCal()
 	FRenderTarget* CurrentSceneDepth = InCurrentSceneDepth->GameThread_GetRenderTargetResource();
 	FRenderTarget* TargetHeight = InTargetHeight->GameThread_GetRenderTargetResource();
 	FRenderTarget* ObjectDepth = InObjectDepth->GameThread_GetRenderTargetResource();
+	FRenderTarget* HeightNormal = InHeightNormal->GameThread_GetRenderTargetResource();
 	float SizeX = SceneDepth->GetSizeXY().X;
 	float SizeY = SceneDepth->GetSizeXY().Y;
 	
@@ -211,7 +214,9 @@ void ACSCliffGenerateCapture::GenerateTargetHeightCal()
 			FRDGTextureRef ObjectNormalTexture = RegisterExternalTexture(GraphBuilder, ObjectNormal->GetRenderTargetTexture(), TEXT("ObjectNormal_RT"));
 			FRDGTextureRef TargetHeightTexture = RegisterExternalTexture(GraphBuilder, TargetHeight->GetRenderTargetTexture(), TEXT("TargetHeight_T"));
 			FRDGTextureRef ObjectDepthTexture = RegisterExternalTexture(GraphBuilder, ObjectDepth->GetRenderTargetTexture(), TEXT("ObjectDepth_T"));
-			
+			FRDGTextureRef HeightNormalTexture = RegisterExternalTexture(GraphBuilder, HeightNormal->GetRenderTargetTexture(), TEXT("NormalHeight_T"));
+
+			PassParameters->T_HeightNormal = HeightNormalTexture;
 			PassParameters->T_ObjectDepth = ObjectDepthTexture;
 			PassParameters->T_TargetHeight = TargetHeightTexture;
 			PassParameters->T_SceneDepth = SceneDepthTexture;
@@ -298,12 +303,7 @@ void ACSCliffGenerateCapture::GenerateCliffVerticalCal(TArray<FCSCliffGenerateDa
 {
 	if (!IsParameterValidMult() || GenerateDatas.Num() == 0) return;
 	
-	InObjectDepth->ResizeTarget(TextureSize, TextureSize);
-	InObjectNormal->ResizeTarget(TextureSize, TextureSize);
-	InSceneNormal->ResizeTarget(TextureSize, TextureSize);
-	InSceneDepth->ResizeTarget(TextureSize, TextureSize);
-	InDebugView->ResizeTarget(TextureSize, TextureSize);
-	InCurrentSceneDepth->ResizeTarget(TextureSize, TextureSize);
+
 	
 	//InConectivityClassifiy->ResizeTarget(TextureSize, TextureSize);
 	InTargetHeight->ResizeTarget(TextureSize, TextureSize);
@@ -314,7 +314,7 @@ void ACSCliffGenerateCapture::GenerateCliffVerticalCal(TArray<FCSCliffGenerateDa
 	FRenderTarget* SceneNormal = InSceneNormal->GameThread_GetRenderTargetResource();
 	FRenderTarget* SceneDepth = InSceneDepth->GameThread_GetRenderTargetResource();
 	FRenderTarget* DebugView = InDebugView->GameThread_GetRenderTargetResource();
-	//FRenderTarget* ConectivityClassifiy = InConectivityClassifiy->GameThread_GetRenderTargetResource();
+	FRenderTarget* HeightNormal = InHeightNormal->GameThread_GetRenderTargetResource();
 	FRenderTarget* Result = InResult->GameThread_GetRenderTargetResource();
 	FRenderTarget* CurrentSceneDepth = InCurrentSceneDepth->GameThread_GetRenderTargetResource();
 	FRenderTarget* TargetHeight = InTargetHeight->GameThread_GetRenderTargetResource();
@@ -403,7 +403,8 @@ void ACSCliffGenerateCapture::GenerateCliffVerticalCal(TArray<FCSCliffGenerateDa
 			
 			FRDGTextureRef TargetHeightTexture = RegisterExternalTexture(GraphBuilder, TargetHeight->GetRenderTargetTexture(), TEXT("TargetHeight_T"));
 			FRDGTextureRef ObjectDepthTexture = RegisterExternalTexture(GraphBuilder, ObjectDepth->GetRenderTargetTexture(), TEXT("ObjectDepth_T"));
-			
+			FRDGTextureRef HeightNormalTexture = RegisterExternalTexture(GraphBuilder, HeightNormal->GetRenderTargetTexture(), TEXT("NormalHeight_T"));
+
 			TArray<FRDGTextureRef> MeshHeightTextures;
 			MeshHeightTextures.Reserve(GenerateDatas.Num());
 			for (int32 i = 0 ; i < GenerateDatas.Num() ; i++)
@@ -428,6 +429,8 @@ void ACSCliffGenerateCapture::GenerateCliffVerticalCal(TArray<FCSCliffGenerateDa
 			FRDGBufferUAVRef Tmp_FilterResult_NumberCount_UAV = GraphBuilder.CreateUAV(FRDGBufferUAVDesc(Tmp_CountBuffer, EPixelFormat::PF_R32_UINT));
 			AddClearUAVPass(GraphBuilder,Tmp_FilterResult_NumberCount_UAV, 0.0);
 
+
+			PassParameters->T_HeightNormal = HeightNormalTexture;
 			PassParameters->T_ObjectDepth = ObjectDepthTexture;
 			PassParameters->T_TargetHeight = TargetHeightTexture;
 			PassParameters->T_Result = ResultTexture;
@@ -551,13 +554,9 @@ void ACSCliffGenerateCapture::GenerateCliffVerticalCal(TArray<FCSCliffGenerateDa
 				// AddCopyTexturePass(GraphBuilder, TmpTexture_ResultB, ResultTexture, FRHICopyTextureInfo());
 			}
 			
-			
 			AddCopyTexturePass(GraphBuilder, TmpTexture_ResultA, ResultTexture, FRHICopyTextureInfo());
 			FRDGTextureRef DebugViewTexture = RegisterExternalTexture(GraphBuilder, DebugView->GetRenderTargetTexture(), TEXT("DebugView_RT"));
 			AddCopyTexturePass(GraphBuilder, TmpTexture_DebugView, DebugViewTexture, FRHICopyTextureInfo());
-			
-			//GraphBuilder.QueueBufferUpload(Tmp_CountBuffer, DebugDrawData->StaticLines.GetData(), BufferNumUint32 * sizeof(uint32));
-			//GraphBuilder.QueueBufferExtraction(Tmp_CountBuffer, &DebugBuffer);
 			
 		}
 		

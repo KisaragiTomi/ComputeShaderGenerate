@@ -3,6 +3,13 @@
 #define PI 3.14159265358979323846264f
 #define PI2 6.2831853071795864769252866f
 
+static const uint2 NeighbourOffset[4] = {
+    uint2(0, 1),   
+    uint2(0, -1), 
+    uint2(-1, 0), 
+    uint2(1, 0)   
+};
+
 // 1D 随机数生成
 float Random1D(float value) {
     return frac(sin(dot(value , 186125.1255645) * 15677.12154));

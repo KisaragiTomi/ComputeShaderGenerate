@@ -52,7 +52,6 @@ public:
 		typename FMeshFillMult::FPermutationDomain PermutationVector;
 		PermutationVector.Set<FMeshFillMult::FMeshFillFunction>(Permutation);
 		TShaderMapRef<FMeshFillMult> ComputeShader(GetGlobalShaderMap(GMaxRHIFeatureLevel), PermutationVector);
-		EMeshFillFunction test = PermutationVector.Get<FMeshFillMult::FMeshFillFunction>();
 		return ComputeShader;
 	}
 	//Declare this class as a global shader
@@ -68,6 +67,7 @@ public:
 		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, T_TargetHeight)
 		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, T_CurrentSceneDepth)
 		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, T_ObjectDepth)
+		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, T_HeightNormal)
 		SHADER_PARAMETER_RDG_TEXTURE(Texture2DArray, TA_MeshHeight)
 		
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, RW_CurrentSceneDepth)

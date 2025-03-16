@@ -35,7 +35,7 @@ class COMPUTESHADERGENERATOR_API ACSGenerateCaptureScene : public AActor
 	GENERATED_BODY()
 public:
 	ACSGenerateCaptureScene();
-	
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = CliffGenerate)
 	UBoxComponent* Box;
 	USceneComponent* SceneComponent;
 
@@ -63,7 +63,7 @@ public:
 	USceneCaptureComponent2D* CaptureObjBaseColor;
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Capturer")
 	USceneCaptureComponent2D* CaptureSceneNormal;
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	UPROPERTY(BlueprintReadOnly)
 	TObjectPtr<class UDynamicMeshComponent> DynamicMeshComponent;
 	
 	TRefCountPtr<FRDGPooledBuffer> DebugBuffer;

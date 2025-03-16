@@ -19,7 +19,7 @@ public:
 	
 	UFUNCTION(BlueprintCallable, Category = "ComputeShader")
 	static void ConnectivityPixel(UTextureRenderTarget2D* InTextureTarget, UTextureRenderTarget2D* InConnectivityMap, UTextureRenderTarget2D
-	                              * InDebugView, int32 Channel = 2);
+	                              * InDebugView, int32 Channel = 2, int32 TextureSize = 256);
 
 	UFUNCTION(BlueprintCallable, Category = "ComputeShader")
 	static void BlurTexture(UTextureRenderTarget2D* InTextureTarget, UTextureRenderTarget2D* OutBlurTexture, float BlurScale = 1);
@@ -37,12 +37,18 @@ public:
 	// UFUNCTION(BlueprintCallable, Category = "ComputeShader")
 	// static void UpPixelsMask(UTextureRenderTarget2D* InTextureTarget, UTextureRenderTarget2D* OutUpTexture, float Threshould = .8, int32 Channel = 0);
 	//
-
+	
 	UFUNCTION(BlueprintCallable, Category = "ComputeShader")
 	static void DrawTextureOut(UTextureRenderTarget2D* InTextureTarget, UTextureRenderTarget2D* OutTextureTarget);
-
 	
 	UFUNCTION(BlueprintCallable, Category = "ComputeShader")
 	static void Test(UTexture2DArray* InArray, UTexture2D* InTexture, UTextureRenderTarget2D* InDebugView);
+	
+	UFUNCTION(BlueprintCallable, Category = "ComputeShader")
+	static void ConvertHeightDataToTexture(UTextureRenderTarget2D* InTextureTarget, UTextureRenderTarget2D* InHeightData, FVector
+	                                       Center, FVector Extent);
+
+	UFUNCTION(BlueprintCallable, Category = "ComputeShader")
+	static void ExtentMaskFast(UTextureRenderTarget2D* InTextureTarget, UTextureRenderTarget2D* InDebugView, int32 Channel = 0, int32 NumExtend = 1);
 };
 

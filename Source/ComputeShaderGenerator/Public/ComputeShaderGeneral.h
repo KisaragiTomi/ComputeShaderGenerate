@@ -72,11 +72,20 @@ public:
 		CP_Init,
 		CP_FindIslands,
 		CP_Count,
+		CP_NormalizeResult,
 		CP_DrawTexture,
 		MAX
 	};
 	class FConnectivityPiexlStep : SHADER_PERMUTATION_ENUM_CLASS("CONNECTIVITYSTEP", EConnectivityStep);
 	using FPermutationDomain = TShaderPermutationDomain<FConnectivityPiexlStep>;
+
+	static TShaderMapRef<FConnectivityPixel> CreateConnectivityPermutation(EConnectivityStep Permutation)
+	{
+		typename FConnectivityPixel::FPermutationDomain PermutationVector;
+		PermutationVector.Set<FConnectivityPixel::FConnectivityPiexlStep>(Permutation);
+		TShaderMapRef<FConnectivityPixel> ComputeShader(GetGlobalShaderMap(GMaxRHIFeatureLevel), PermutationVector);
+		return ComputeShader;
+	}
 	//Declare this class as a global shader
 	DECLARE_GLOBAL_SHADER(FConnectivityPixel);
 	//Tells the engine that this shader uses a structure for its parameters
@@ -87,9 +96,12 @@ public:
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, RW_DebugView)
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, RW_LabelBufferA)
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, RW_LabelBufferB)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<int32>, RW_LabelCounters)
 		SHADER_PARAMETER(int, Channel)
 		SHADER_PARAMETER(int, PieceNum)
-		SHADER_PARAMETER_RDG_BUFFER_UAV(RWBuffer<uint>, RW_LabelCounters)
+		// SHADER_PARAMETER_RDG_BUFFER_UAV(RWBuffer<uint>, RW_LabelCounters)
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWBuffer<uint>, RW_NormalizeCounter)
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWBuffer<float4>, RW_ResultBuffer)
 
 		SHADER_PARAMETER_SAMPLER(SamplerState, Sampler)
 	END_SHADER_PARAMETER_STRUCT()
@@ -116,6 +128,7 @@ public:
 			TEXT("CONNECTIVITYSTEP_CP_Init"),
 			TEXT("CONNECTIVITYSTEP_CP_FindIslands"),
 			TEXT("CONNECTIVITYSTEP_CP_Count"),
+			TEXT("CONNECTIVITYSTEP_CP_NormalizeResult"),
 			TEXT("CONNECTIVITYSTEP_CP_DrawTexture")
 		};
 		static_assert(UE_ARRAY_COUNT(ShaderSourceModeDefineName) == (uint32)EConnectivityStep::MAX, "Enum doesn't match define table.");
@@ -258,38 +271,44 @@ IMPLEMENT_GLOBAL_SHADER(FUpPixelsMask, "/OoOShaders/BasicFunction.usf", "UpPixel
 
 
 
-class FGeneralTempShader : public FGlobalShader
+class FGeneralFunctionShader : public FGlobalShader
 {
 public:
 	enum class ETempShader : uint8
 	{
 		GTS_ProcessMeshHeightTexture,
 		GTS_TextureArrayTest,
+		GTS_ConvertHeightDataToTexture,
+		GTS_MaskExtendFast,
 		MAX
 	};
-	class FTempFunctionSet : SHADER_PERMUTATION_ENUM_CLASS("TEMPFUNCTION", ETempShader);
-	using FPermutationDomain = TShaderPermutationDomain<FTempFunctionSet>;
+	class FGeneralFunctionSet : SHADER_PERMUTATION_ENUM_CLASS("GeneralFunction", ETempShader);
+	using FPermutationDomain = TShaderPermutationDomain<FGeneralFunctionSet>;
 
-	static TShaderMapRef<FGeneralTempShader> CreateTempShaderPermutation(ETempShader Permutation)
+	static TShaderMapRef<FGeneralFunctionShader> CreateTempShaderPermutation(ETempShader Permutation)
 	{
-		typename FGeneralTempShader::FPermutationDomain PermutationVector;
-		PermutationVector.Set<FGeneralTempShader::FTempFunctionSet>(Permutation);
-		TShaderMapRef<FGeneralTempShader> ComputeShader(GetGlobalShaderMap(GMaxRHIFeatureLevel), PermutationVector);
-		ETempShader test = PermutationVector.Get<FGeneralTempShader::FTempFunctionSet>();
+		typename FGeneralFunctionShader::FPermutationDomain PermutationVector;
+		PermutationVector.Set<FGeneralFunctionShader::FGeneralFunctionSet>(Permutation);
+		TShaderMapRef<FGeneralFunctionShader> ComputeShader(GetGlobalShaderMap(GMaxRHIFeatureLevel), PermutationVector);
 		return ComputeShader;
 	}
 	
 	//Declare this class as a global shader
-	DECLARE_GLOBAL_SHADER(FGeneralTempShader);
+	DECLARE_GLOBAL_SHADER(FGeneralFunctionShader);
 	//Tells the engine that this shader uses a structure for its parameters
-	SHADER_USE_PARAMETER_STRUCT(FGeneralTempShader, FGlobalShader);
+	SHADER_USE_PARAMETER_STRUCT(FGeneralFunctionShader, FGlobalShader);
 	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
-		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, T_ProcssTexture)
-		SHADER_PARAMETER_RDG_TEXTURE(Texture2DArray, TA_ProcssTexture)
-		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, RW_ProcssTexture)
+		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, T_ProcssTexture0)
+		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, T_ProcssTexture1)
+		SHADER_PARAMETER_RDG_TEXTURE(Texture2DArray, TA_ProcssTexture0)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, RW_ProcssTexture0)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, RW_ProcssTexture1)
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, RW_DebugView)
-		SHADER_PARAMETER(float, InputData)
-		//SHADER_PARAMETER(int, Channel)
+		SHADER_PARAMETER(float, InputData0)
+		SHADER_PARAMETER(int32, InputIntData0)
+		SHADER_PARAMETER(int32, InputIntData1)
+		SHADER_PARAMETER(FVector3f, InputVectorData0)
+		SHADER_PARAMETER(FVector3f, InputVectorData1)
 
 		SHADER_PARAMETER_SAMPLER(SamplerState, Sampler)
 	END_SHADER_PARAMETER_STRUCT()
@@ -316,15 +335,15 @@ public:
 		{
 			TEXT("GTS_PROCESSMESHHEIGHTTEXTURE"),
 			TEXT("GTS_TEXTUREARRAYTEST"),
+			TEXT("GTS_CONVERTHEIGHTDATATEXTURE"),
+			TEXT("GTS_MASKEXTENDFAST"),
 		};
 		static_assert(UE_ARRAY_COUNT(ShaderSourceModeDefineName) == (uint32)ETempShader::MAX, "Enum doesn't match define table.");
 		
 		const FPermutationDomain PermutationVector(Parameters.PermutationId);
-		const uint32 SourceModeIndex = static_cast<uint32>(PermutationVector.Get<FTempFunctionSet>());
+		const uint32 SourceModeIndex = static_cast<uint32>(PermutationVector.Get<FGeneralFunctionSet>());
 		OutEnvironment.SetDefine(ShaderSourceModeDefineName[SourceModeIndex], 1u);
 	}
-
-
 };
 
-IMPLEMENT_GLOBAL_SHADER(FGeneralTempShader, "/OoOShaders/BasicFunction.usf", "TempFunction", SF_Compute);
+IMPLEMENT_GLOBAL_SHADER(FGeneralFunctionShader, "/OoOShaders/BasicFunction.usf", "GeneralFunctionSet", SF_Compute);

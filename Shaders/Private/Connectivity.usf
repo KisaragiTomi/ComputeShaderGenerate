@@ -8,29 +8,6 @@
 #define THREADGROUPSIZE_Y 32
 #endif
 
-// #define CONNECTIVITYSTEP_CP_Init 0
-// #define CONNECTIVITYSTEP_CP_FindIslands 1
-// #define CONNECTIVITYSTEP_CP_Count 2
-// #define CONNECTIVITYSTEP_CP_DrawTexture 3
-// float a = 1;
-// float b = 1;
-// float c = 1;
-// float d = 1;
-// #if CONNECTIVITYSTEP_CP_Init
-// 	
-// 	a = 0;
-// #elif CONNECTIVITYSTEP_CP_FindIslands 
-// 	b = 0;
-//
-// #elif CONNECTIVITYSTEP_CP_Count
-// 	c = 0;
-//
-// #elif CONNECTIVITYSTEP_CP_DrawTexture
-// 	d = 0;
-// #endif
-//
-// float4 t = float4(a, b, c, d);
-
 SamplerState Sampler;
 
 
@@ -41,11 +18,14 @@ RWTexture2D<float4> RW_DebugView;
 RWTexture2D<float4> RW_LabelBufferA;
 RWTexture2D<float4> RW_LabelBufferB;
 
-RWBuffer<uint> RW_LabelCounters;
-RWBuffer<uint> RW_LabelIndex;
+RWTexture2D<uint> RW_LabelCounters;
+
+// RWBuffer<uint> RW_LabelCounters;
+RWBuffer<uint> RW_NormalizeCounter;
+RWBuffer<float4> RW_ResultBuffer;
 // RWBuffer<float> RW_;
 int Channel;
-int PieceNum;
+uint PieceNum;
 //ConsumeStructuredBuffer<uint> FreeLabels;
 
 
@@ -88,193 +68,147 @@ void CPF_Init(uint3 DispatchThreadId)
 {
 	float MaxCell = 0;
 	InputTexture.GetDimensions(MaxCell, MaxCell);
-	// MaxCell -= 1;
+
+	// 使用像素坐标生成唯一标签
+	float label = DispatchThreadId.y * MaxCell + DispatchThreadId.x + 1; // +1避免0冲突
 	if (InputTexture[DispatchThreadId.xy][Channel] > 0)
 	{
-		// 使用像素坐标生成唯一标签
-		float label = DispatchThreadId.y * MaxCell + DispatchThreadId.x + 1; // +1避免0冲突
-		RW_LabelBufferA[DispatchThreadId.xy] = label;
-		RW_LabelBufferB[DispatchThreadId.xy] = label;
-		// RW_DebugView[DispatchThreadId.xy] = float4(label/ 1000, 0, 0, 0);
+		RW_LabelBufferA[DispatchThreadId.xy].xy = DispatchThreadId.xy;
+		RW_LabelBufferB[DispatchThreadId.xy].xy = DispatchThreadId.xy;
+		
+		RW_DebugView[DispatchThreadId.xy] = float4(label/100000.0, 0, 0, 0);
 		
 	} else
 	{
-		RW_LabelBufferA[DispatchThreadId.xy] = 0;
-		RW_LabelBufferB[DispatchThreadId.xy] = 0;
-		RW_DebugView[DispatchThreadId.xy] = 0;
+		RW_LabelBufferA[DispatchThreadId.xy] = -1;
+		RW_LabelBufferB[DispatchThreadId.xy] = -1;
+		RW_DebugView[DispatchThreadId.xy] = -1;
 	}
-	// uint currentLabel = RW_LabelBufferA[DispatchThreadId.xy];
-	
 }
 void CPF_Findislands(uint3 DispatchThreadId, uint3 GroupThreadId, uint3 GroupID)
 {
-	float4 currentLabel = RW_LabelBufferA[DispatchThreadId.xy];
-	if (currentLabel.x == 0) return;
-
-	
+	float2 currentLabel = RW_LabelBufferA[DispatchThreadId.xy].xy;
 	float MaxCell = 0;
 	InputTexture.GetDimensions(MaxCell, MaxCell);
-	MaxCell -= 1;
-	static const uint2 directionOffsets[4] = {
-		uint2(0, 1),   
-		uint2(0, -1), 
-		uint2(-1, 0), 
-		uint2(1, 0)   
-	};
-	
-	// 四邻域采样（上、下、左、右）
-	float minNeighbor = currentLabel.x;
-	
-	[unroll]
-	for (int i = 0; i < 4; i++)
-	{
-		float4 LabelValue =  RW_LabelBufferA[clamp(DispatchThreadId.xy + directionOffsets[i], uint2(0, 0), uint2(MaxCell, MaxCell))];
-		if (LabelValue.x == 0)
-			continue;
-		minNeighbor = min(minNeighbor, LabelValue.x);
-	}
-	RW_LabelBufferB[DispatchThreadId.xy] = float4(minNeighbor, 0, 0, 0);
+	int PixelNum = RW_LabelBufferA[DispatchThreadId.xy].x - 1;
+	float LineX = PixelNum - 100 * 256;
+	int2 DispathThreadIdFromLabel = int2(LineX, PixelNum / MaxCell);
+	RW_DebugView[DispathThreadIdFromLabel].y = LineX / 100.0;
 }
 
 
-groupshared float ShareFind [THREADGROUPSIZE_X + 2][THREADGROUPSIZE_X + 2];
+groupshared half2 ShareFind [THREADGROUPSIZE_X + 2][THREADGROUPSIZE_X + 2];
 
 void CPF_FindislandsFast(uint3 DispatchThreadId, uint3 GroupThreadId, uint3 GroupID)
 {
 	
-	float4 currentLabel = RW_LabelBufferA[DispatchThreadId.xy];
-	
 	float MaxCell = 0;
 	InputTexture.GetDimensions(MaxCell, MaxCell);
 	MaxCell -= 1;
-	static const uint2 directionOffsets[4] = {
-		uint2(0, 1),   
-		uint2(0, -1), 
-		uint2(-1, 0), 
-		uint2(1, 0)   
-	};
-	
 	
     int PixelBoundSize = 1;
     int2 globalPos = DispatchThreadId.xy;
-
-    // 加载主区域到共享内存
-     ShareFind[GroupThreadId.x + PixelBoundSize][GroupThreadId.y + PixelBoundSize] = RW_LabelBufferA[DispatchThreadId.xy].x;
- 
-    // 左边缘
+	ShareFind[GroupThreadId.x + PixelBoundSize][GroupThreadId.y + PixelBoundSize] = RW_LabelBufferA[DispatchThreadId.xy].xy;
+	// RW_DebugView[DispatchThreadId.xy].xy = RW_LabelBufferA[DispatchThreadId.xy].xy;
+	RW_DebugView[DispatchThreadId.xy].y = 0;
+	
     if (GroupThreadId.x < PixelBoundSize)
     {
         int2 pos = globalPos - int2(PixelBoundSize, 0);
-        ShareFind[GroupThreadId.x][GroupThreadId.y + PixelBoundSize] = RW_LabelBufferA[clamp(pos, int2(0,0), MaxCell)].x;
+        ShareFind[GroupThreadId.x][GroupThreadId.y + PixelBoundSize] = RW_LabelBufferA[clamp(pos, 0, MaxCell)].xy;
     }
-    // 右边缘
     if (GroupThreadId.x >= THREADGROUPSIZE_X - PixelBoundSize)
     {
         int2 pos = globalPos + int2(PixelBoundSize, 0);
-        ShareFind[GroupThreadId.x + PixelBoundSize * 2][GroupThreadId.y + PixelBoundSize] = RW_LabelBufferA[clamp(pos, int2(0,0), MaxCell)].x;
+        ShareFind[GroupThreadId.x + PixelBoundSize * 2][GroupThreadId.y + PixelBoundSize] = RW_LabelBufferA[clamp(pos, 0, MaxCell)].xy;
     }
-    // 上边缘
     if (GroupThreadId.y < PixelBoundSize)
     {
         int2 pos = globalPos - int2(0, PixelBoundSize);
-        ShareFind[GroupThreadId.x + PixelBoundSize][GroupThreadId.y] = RW_LabelBufferA[clamp(pos, int2(0,0), MaxCell)].x;
+        ShareFind[GroupThreadId.x + PixelBoundSize][GroupThreadId.y] = RW_LabelBufferA[clamp(pos, 0, MaxCell)].xy;
     }
-    // 下边缘
     if (GroupThreadId.y >= THREADGROUPSIZE_X - PixelBoundSize)
     {
         int2 pos = globalPos + int2(0, PixelBoundSize);
-        ShareFind[GroupThreadId.x + PixelBoundSize][GroupThreadId.y + PixelBoundSize * 2] = RW_LabelBufferA[clamp(pos, int2(0,0), MaxCell)].x;
+        ShareFind[GroupThreadId.x + PixelBoundSize][GroupThreadId.y + PixelBoundSize * 2] = RW_LabelBufferA[clamp(pos, 0, MaxCell)].xy;
     }
 	
-    // 同步线程
     GroupMemoryBarrierWithGroupSync();
 	
-	float CurrentShareFind = 0;
-	[loop]
-    for (int i = 0; i < THREADGROUPSIZE_X * 4; i ++)
+	MaxCell += 1;
+	float2 CurrentShareFind = ShareFind[GroupThreadId.x + PixelBoundSize][GroupThreadId.y + PixelBoundSize];
+	if (CurrentShareFind.x == -1) return;
+    for (int i = 0; i < THREADGROUPSIZE_X * 2; i ++)
     {
         CurrentShareFind = ShareFind[GroupThreadId.x + PixelBoundSize][GroupThreadId.y + PixelBoundSize];
-        if (CurrentShareFind == 0) continue;
+    	float CurrentIndex = CurrentShareFind.x + CurrentShareFind.y * MaxCell;
     	
-    	[unroll]
         for (int n = 0; n < 4; n++)
         {
-            uint2 Offset = GroupThreadId.xy + PixelBoundSize + directionOffsets[n];
-            float ShareResult = ShareFind[Offset.x][Offset.y];
-        	CurrentShareFind = ShareResult == 0 ? CurrentShareFind : min(ShareResult, CurrentShareFind);
-        	ShareFind[GroupThreadId.x + PixelBoundSize][GroupThreadId.y + PixelBoundSize] = CurrentShareFind;
+            uint2 Offset = GroupThreadId.xy + PixelBoundSize + NeighbourOffset[n];
+            float2 ShareResult = ShareFind[Offset.x][Offset.y].xy;
+        	float Index = ShareResult.x + ShareResult.y * MaxCell;
+        	if ( Index > 0 && CurrentIndex > Index)
+        	{
+        		CurrentIndex = Index;
+        		ShareFind[GroupThreadId.x + PixelBoundSize][GroupThreadId.y + PixelBoundSize] = ShareResult;
+        	}
+        	// CurrentIndex = ShareResult.x >= 0 ? CurrentShareFind : min(ShareResult, CurrentShareFind);
+        	// ShareFind[GroupThreadId.x + PixelBoundSize][GroupThreadId.y + PixelBoundSize] = CurrentShareFind;
         }
         GroupMemoryBarrierWithGroupSync();
     }
 	
 	CurrentShareFind = ShareFind[GroupThreadId.x + PixelBoundSize][GroupThreadId.y + PixelBoundSize];
-	RW_LabelBufferB[DispatchThreadId.xy] = float4(CurrentShareFind, 0, 0, 0);
-	// RW_DebugView[DispatchThreadId.xy] = CurrentShareFind;
+	RW_LabelBufferB[DispatchThreadId.xy] = float4(CurrentShareFind, 0, 0);
+
+	RW_DebugView[CurrentShareFind].y = 11111;
+
+
 }
 
 void CPF_Count(uint3 DispatchThreadId)
 {
 	
-	uint label = (uint)RW_LabelBufferA[DispatchThreadId.xy].x;
-	uint CurrentValue = 0;
-	if (label != 0)
+	float2 IndexXY = RW_LabelBufferA[DispatchThreadId.xy].xy;
+	RW_LabelBufferB[DispatchThreadId.xy].xy = 0;
+	
+	if (IndexXY.x != -1)
 	{
-		InterlockedAdd(RW_LabelCounters[label], 1, CurrentValue);
+		InterlockedAdd(RW_LabelCounters[DispatchThreadId.xy], 1);
 	}
 }
 
-groupshared float2 ShareCount [THREADGROUPSIZE_X];
-
-void CPF_CountReduction(uint3 DispatchThreadId, uint3 GroupThreadId, uint3 GroupID)
+void CPF_NormalizeResult(uint3 DispatchThreadId, uint3 GroupThreadId, uint3 GroupID)
 {
 	
-	uint index = GroupId.x * 256 + GroupThreadId.x;
-	sharedMin[GroupThreadId.x].x = RW_LabelBufferA[DispatchThreadId.x].x;
-    
-	GroupMemoryBarrierWithGroupSync(); // 同步线程组
-	
-	for (uint stride = 128; stride > 0; stride >>= 1)
-	{
-		if (GroupThreadId.x < stride)
-		{
-			sharedMin[GroupThreadId.x] = min(sharedMin[GroupThreadId.x], sharedMin[GroupThreadId.x + stride]);
-		}
-		GroupMemoryBarrierWithGroupSync();
-	}
+	float2 IndexXY = RW_LabelBufferA[DispatchThreadId.xy].xy;
+	if (DispatchThreadId.x != IndexXY.x || DispatchThreadId.y != IndexXY.y || IndexXY.x == -1) return;
 
-	// 写入线程组的最小值到输出缓冲区
-	if (GroupThreadId.x == 0) 
-	{
-		RW_ConnectivityPixel[DispatchThreadId.x] = sharedMin[0];
-	}
+	uint PreValue = 0;
+	InterlockedAdd(RW_NormalizeCounter[0], 1, PreValue);
+
+	float Count = RW_LabelCounters[IndexXY];
+	RW_ResultBuffer[PreValue].xyz = float3(IndexXY, Count);
+	RW_LabelBufferB[DispatchThreadId.xy].x = PreValue;
 }
-
-
 
 void CPF_DrawTexture(uint3 DispatchThreadId)
 {
-	
-	uint label = (uint)RW_LabelBufferA[DispatchThreadId.xy].x;
-	
-	if (label == 0)
-	{
-		RW_ConnectivityPixel[DispatchThreadId.xy] = float4(0, 0, 0, 1); // 背景黑色
-		return;
-	}
-	
-	// 读取该标签的像素数量
-	float count = RW_LabelCounters[label];
-	
 	float MaxCell = 0;
-	RW_ConnectivityPixel.GetDimensions(MaxCell, MaxCell);
+	InputTexture.GetDimensions(MaxCell, MaxCell);
 	MaxCell -= 1;
-
-	// RW_DebugView[DispatchThreadId.xy] = count > (MaxCell * MaxCell / 200);
-	RW_DebugView[DispatchThreadId.xy] = count;
-	// 归一化颜色映射（假设最大岛屿为MaxCount）
-	float intensity = saturate(count / (MaxCell * MaxCell) * 4);
-	RW_ConnectivityPixel[DispatchThreadId.xy] = float4(intensity, count, 0, 1); // 红色通道表示大小
 	
+	float MaxCount = RW_NormalizeCounter[0];
+	RW_ConnectivityPixel[uint2(MaxCell, MaxCell)].w = MaxCount;
+	float2 IndexXY = RW_LabelBufferA[DispatchThreadId.xy].xy;
+	
+	if (IndexXY.x == -1) return;
+
+	int NormalizedIndex = RW_LabelBufferB[IndexXY].x;
+	float Count = RW_ResultBuffer[NormalizedIndex].z;
+	RW_ConnectivityPixel[DispatchThreadId.xy].xyz = float3(RW_LabelBufferB[IndexXY].x + 1, (RW_LabelBufferB[IndexXY].x + 1) / MaxCount, Count);
+	RW_ConnectivityPixel[uint2(NormalizedIndex, 0)].w = Count;
 }
 
 [numthreads(THREADGROUPSIZE_X, THREADGROUPSIZE_Y, THREADGROUPSIZE_Z)]
@@ -293,8 +227,11 @@ void ConnectivityPixel(
 
 #elif CONNECTIVITYSTEP_CP_Count
 	CPF_Count(DispatchThreadId);
-
+#elif CONNECTIVITYSTEP_CP_NormalizeResult
+	CPF_NormalizeResult(DispatchThreadId, GroupThreadId, GroupId);
+	
 #elif CONNECTIVITYSTEP_CP_DrawTexture
+	
 	CPF_DrawTexture(DispatchThreadId);
 	
 #endif

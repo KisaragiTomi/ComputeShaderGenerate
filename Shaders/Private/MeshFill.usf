@@ -33,6 +33,7 @@ int SelectIndex;
 
 
 Texture2D T_FilterResult;
+Texture2D T_HeightNormal;
 Texture2D T_CurrentSceneDepth;//T_CurrentSceneDepth   .x = SceneDepth .y = ungeneratemask .z = generatemask
 Texture2D T_SceneDepth;
 Texture2D T_TMeshDepth;
@@ -64,19 +65,14 @@ RWBuffer<uint> RW_FindPixelBufferResult_NumberCount;
 
 SamplerState Sampler;
 
-static const uint2 NeighbourOffset[4] = {
-    uint2(0, 1),   
-    uint2(0, -1), 
-    uint2(-1, 0), 
-    uint2(1, 0)   
-};
+
 
 groupshared half2 shareMhalf2[THREADGROUPSIZE_X + 2][THREADGROUPSIZE_Y + 2];
 //T_TargetHeight .x : Height .y : GenerateMask
 void GenerateTargetHeight(uint3 DispatchThreadId, uint3 GroupThreadId, uint3 GroupID)
 {
     float MaxCell;
-    T_SceneDepth.GetDimensions(MaxCell, MaxCell);
+    T_HeightNormal.GetDimensions(MaxCell, MaxCell);
     MaxCell -= 1;
     
     int PixelBoundSize = 1;
@@ -136,7 +132,7 @@ groupshared half3 shareExtenthalf2[THREADGROUPSIZE_X + EXTENTGENERATEMASK * 2][T
 void ExtentGenerateMask(uint3 DispatchThreadId, uint3 GroupThreadId, uint3 GroupID)
 {
     float MaxCell;
-    T_SceneDepth.GetDimensions(MaxCell, MaxCell);
+    T_HeightNormal.GetDimensions(MaxCell, MaxCell);
     MaxCell -= 1;
     
     int PixelBoundSize = EXTENTGENERATEMASK;
@@ -198,11 +194,11 @@ void ExtentGenerateMask(uint3 DispatchThreadId, uint3 GroupThreadId, uint3 Group
 void InitCurrentSceneDepth(uint3 DispatchThreadId, uint3 GroupThreadId, uint3 GroupID)
 {
     
-    float3 SceneNormal = T_SceneNormal[DispatchThreadId.xy].xyz;
+    float3 SceneNormal = T_HeightNormal[DispatchThreadId.xy].xyz;
     float ObjHeight = MAX_HEIGHT - min(T_ObjectDepth[DispatchThreadId.xy].x, 10000);
     
 
-    float Height = MAX_HEIGHT - T_SceneDepth[DispatchThreadId.xy].x;
+    float Height = T_HeightNormal[DispatchThreadId.xy].w;
     float UnGenerateMask = (T_ObjectNormal[DispatchThreadId.xy].z > 0.01) && (ObjHeight > Height);
     float GenerateMask = dot(SceneNormal, float3(0, 0, 1)) < .75 && dot(SceneNormal, float3(0, 0, 1)) > 0;
     float Rotate = atan2(SceneNormal.y, SceneNormal.x);
@@ -214,14 +210,14 @@ void InitCurrentSceneDepth(uint3 DispatchThreadId, uint3 GroupThreadId, uint3 Gr
 
 void InitCalTargetHeight(uint3 DispatchThreadId, uint3 GroupThreadId, uint3 GroupID)
 {
-    float3 SceneNormal = T_SceneNormal[DispatchThreadId.xy].xyz;
+    float3 SceneNormal = T_HeightNormal[DispatchThreadId.xy].xyz;
     float ObjHeight = MAX_HEIGHT - min(T_ObjectDepth[DispatchThreadId.xy].x, 10000);
     
 
-    float Height = MAX_HEIGHT - T_SceneDepth[DispatchThreadId.xy].x;
+    float Height = T_HeightNormal[DispatchThreadId.xy].w;
     float UnGenerateMask = (T_ObjectNormal[DispatchThreadId.xy].z > 0.01) && (ObjHeight > Height);
     float GenerateMask = dot(SceneNormal, float3(0, 0, 1)) < .75 && dot(SceneNormal, float3(0, 0, 1)) > 0;
-
+    
     
     RW_CurrentSceneDepth[DispatchThreadId.xy] = float4(Height, UnGenerateMask, GenerateMask, 0);
     RW_TargetHeight[DispatchThreadId.xy] = float4(Height, GenerateMask, 0, 0);
@@ -450,7 +446,7 @@ void FindBestPixelInRW(uint3 DispatchThreadId, uint3 GroupThreadId ,uint3 GroupI
     }
     
     GroupMemoryBarrierWithGroupSync();
-
+    
     float4 ShareData = SharedMaxRW[GroupThreadId.x][GroupThreadId.y];
     uint2 SaveDataIndex = ShareData.zw;
     uint SaveGroupThreadId = ShareData.y;
@@ -568,6 +564,7 @@ void UpdateCurrentSceneMult(uint3 DispatchThreadId, uint3 GroupThreadId ,uint3 G
     RW_DebugView[DispatchThreadId.xy].z = (DebugMask > 0) * .5;
     // RW_DebugView[DispatchThreadId.xy].z = (DebugMask > 0) * .5;
     RW_ResultB[uint2(MaxResult.x - 1, MaxResult.y - 1)] = float4(ResultIndex, ResultIndex, MaxResultCount, 0);
+    
 }
 
 [numthreads(THREADGROUPSIZE_X, THREADGROUPSIZE_Y, THREADGROUPSIZE_Z)]

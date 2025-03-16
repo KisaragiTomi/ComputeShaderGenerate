@@ -20,7 +20,7 @@ namespace CSHepler
 
 	FRDGTextureRef ConvertToUVATextureFormat(FRDGBuilder& GraphBuilder, FRenderTarget* RenderTarget,  EPixelFormat Format = PF_FloatRGBA, const TCHAR* Name = TEXT("TempTexture"), FLinearColor ClearColor = FLinearColor(0 ,0 ,0, 0) )
 	{
-		FRDGTextureDesc Desc_View(FRDGTextureDesc::Create2D(RenderTarget->GetSizeXY(), PF_FloatRGBA, FClearValueBinding::White, TexCreate_RenderTargetable | TexCreate_ShaderResource | TexCreate_UAV));
+		FRDGTextureDesc Desc_View(FRDGTextureDesc::Create2D(RenderTarget->GetSizeXY(), Format, FClearValueBinding::White, TexCreate_RenderTargetable | TexCreate_ShaderResource | TexCreate_UAV));
 		FRDGTextureRef TmpTexture = GraphBuilder.CreateTexture(Desc_View, Name);
 		AddClearRenderTargetPass(GraphBuilder, TmpTexture, ClearColor);
 		return TmpTexture;
@@ -28,7 +28,7 @@ namespace CSHepler
 
 	FRDGTextureRef ConvertToUVATextureFormat(FRDGBuilder& GraphBuilder, FIntPoint Size,  EPixelFormat Format = PF_FloatRGBA, const TCHAR* Name = TEXT("TempTexture"), FLinearColor ClearColor = FLinearColor(0 ,0 ,0, 0) )
 	{
-		FRDGTextureDesc Desc_View(FRDGTextureDesc::Create2D(Size, PF_FloatRGBA, FClearValueBinding::White, TexCreate_RenderTargetable | TexCreate_ShaderResource | TexCreate_UAV));
+		FRDGTextureDesc Desc_View(FRDGTextureDesc::Create2D(Size, Format, FClearValueBinding::White, TexCreate_RenderTargetable | TexCreate_ShaderResource | TexCreate_UAV));
 		FRDGTextureRef TmpTexture = GraphBuilder.CreateTexture(Desc_View, Name);
 		AddClearRenderTargetPass(GraphBuilder, TmpTexture, ClearColor);
 		return TmpTexture;

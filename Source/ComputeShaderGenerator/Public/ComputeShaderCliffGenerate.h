@@ -32,6 +32,10 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = CliffGenerate)
 	UTextureRenderTarget2D* InMask;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = CliffGenerate)
+	UTextureRenderTarget2D* InHeightData;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = CliffGenerate)
+	UTextureRenderTarget2D* InHeightNormal;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = CliffGenerate)
 	UTextureRenderTarget2D* InDebugView;

@@ -138,8 +138,8 @@ void ACSGenerateCaptureScene::CaptureMeshsInBox()
 	if (CaptureObjNormal->TextureTarget != nullptr)		CaptureObjNormal->CaptureScene();
 	if (CaptureObjBaseColor->TextureTarget != nullptr)	CaptureObjBaseColor->CaptureScene();
 	if (CaptureObjectDepth->TextureTarget != nullptr)	CaptureObjectDepth->CaptureScene();
-	if (CaptureSceneDepth->TextureTarget != nullptr)	CaptureSceneDepth->CaptureScene();
-	if (CaptureSceneNormal->TextureTarget != nullptr)	CaptureSceneNormal->CaptureScene();
+	// if (CaptureSceneDepth->TextureTarget != nullptr)	CaptureSceneDepth->CaptureScene();
+	// if (CaptureSceneNormal->TextureTarget != nullptr)	CaptureSceneNormal->CaptureScene();
 }
 
 bool ACSGenerateCaptureScene::CreateLandscapeMesh()
