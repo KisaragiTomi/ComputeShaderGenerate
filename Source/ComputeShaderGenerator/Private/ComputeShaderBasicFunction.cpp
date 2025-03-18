@@ -15,7 +15,9 @@
 #include "Kismet/KismetRenderingLibrary.h"
 #include "ComputeShaderGeneral.h"
 #include "LandscapeExtra.h"
+#include "Components/SplineComponent.h"
 #include "Engine/Texture2DArray.h"
+#include "GeometryScript/PolyPathFunctions.h"
 
 DECLARE_STATS_GROUP(TEXT("TestTime"), STATGROUP_CSTest, STATCAT_Advanced);
 DECLARE_CYCLE_STAT(TEXT("CS Execute"), STAT_CSTest_Execute, STATGROUP_CSTest)
@@ -575,5 +577,137 @@ void UComputeShaderBasicFunction::ExtentMaskFast(UTextureRenderTarget2D* InTextu
 		GraphBuilder.Execute();
 	});
 	FlushRenderingCommands();
+}
+
+TArray<FTransform> UComputeShaderBasicFunction::SampleSpline(UTextureRenderTarget2D* InTextureTarget,
+                                                             UTextureRenderTarget2D* InDebugView,
+                                                             TArray<USplineComponent*> InSplineComponents,
+                                                             FBoxSphereBounds& Bounds,
+                                                             int32 TextureSize, float Interval)
+{
+	TArray<FTransform> OutTransforms;
+	if (InTextureTarget == nullptr || InDebugView == nullptr || InSplineComponents.Num() == 0) return OutTransforms;
+
+	
+	int32 ThreadGroupSize = 32;
+	int32 GroupCountX = TextureSize / ThreadGroupSize;
+	int32 SplineMaxElement = 1024;
+	int32 NumSpline = InSplineComponents.Num();
+	// int32 MaxNumPointPerCell = 128;
+	int32 BufferNumElement = SplineMaxElement * InSplineComponents.Num();
+	int32 ElementSize = sizeof(FLinearColor);
+
+	
+	
+	FBoxSphereBounds MaxBounds = InSplineComponents[0]->Bounds;
+	TArray<TArray<FTransform>> ResampleTransform;
+	for (USplineComponent* SplineComponent : InSplineComponents)
+	{
+		MaxBounds = Union(MaxBounds, SplineComponent->Bounds) ;
+		float SplineLength = SplineComponent->GetSplineLength();
+		// int32 ExpectSamples = FMath::Min(SplineLength / FMath::Max(1, Interval), SplineMaxElement);
+		TArray<FTransform> Frames;
+		TArray<double> FrameTimes;
+		FGeometryScriptSplineSamplingOptions SamplingOptions;
+		SamplingOptions.NumSamples = SplineMaxElement;
+		if (!UGeometryScriptLibrary_PolyPathFunctions::SampleSplineToTransforms(SplineComponent, Frames, FrameTimes, SamplingOptions, FTransform::Identity)) continue;
+		ResampleTransform.Add(Frames);
+		
+	}
+	MaxBounds.BoxExtent =  FVector(1, 1, 0) * FMath::Max(MaxBounds.BoxExtent.X, MaxBounds.BoxExtent.Y);
+	FVector BoundMin = MaxBounds.Origin - MaxBounds.BoxExtent;
+	FVector BoundMax = MaxBounds.Origin + MaxBounds.BoxExtent;
+	FVector BoundSize = BoundMax - BoundMin;
+	// FVector Boundsize = FVector(1, 1, 0) * FMath::Max(BoundSize.X, BoundSize.Y);
+	float SizeTatal = FMath::Max(BoundSize.X, BoundSize.Y);
+	float SizePerCell = SizeTatal / GroupCountX;
+
+	TArray<int32> SplinePointCount;
+	TArray<FLinearColor> SplinePoints;
+	SplinePoints.AddZeroed(NumSpline * SplineMaxElement);
+	SplinePointCount.AddZeroed(NumSpline);
+	OutTransforms.Reserve(NumSpline * SplineMaxElement);
+	for (int32 i = 0; i < NumSpline; i++)
+	{
+		FTransform SplineTransform = InSplineComponents[i]->GetComponentTransform();
+		SplinePointCount[i] = ResampleTransform[i].Num();
+		for (int32 j = 0; j < ResampleTransform[i].Num(); j++)
+		{
+			FTransform Transform = ResampleTransform[i][j] * SplineTransform;
+			float Rotate = Transform.GetRotation().Rotator().Yaw;
+			FVector Location = Transform.GetLocation();
+			FVector LocationUVW = (Location - BoundMin) / BoundSize;
+			FLinearColor Color = FLinearColor(Location.X, Location.Y, Location.Z, Rotate);
+			SplinePoints[i * SplineMaxElement + j] = Color;
+			OutTransforms.Add(Transform);
+		}
+	}
+	{
+		SCOPE_CYCLE_COUNTER(STAT_CSTest_Execute);
+		InTextureTarget->ResizeTarget(TextureSize, TextureSize);
+		InDebugView->ResizeTarget(TextureSize, TextureSize);
+		
+		FRenderTarget* TextureTarget = InTextureTarget->GameThread_GetRenderTargetResource();
+		FRenderTarget* DebugView = InDebugView->GameThread_GetRenderTargetResource();
+		ENQUEUE_RENDER_COMMAND(SceneDrawCompletion)(
+		[=](FRHICommandListImmediate& RHICmdList)
+		{
+			FRDGBuilder GraphBuilder(RHICmdList);
+			{
+				
+				FIntVector GroupSize = FIntVector(TextureTarget->GetSizeXY().X, TextureTarget->GetSizeXY().Y, 1);
+				FIntVector GroupCount = FComputeShaderUtils::GetGroupCount(GroupSize, 32);
+				// GroupCount = FIntVector(1, 1, 1);
+				FIntPoint TextureSizeXY = TextureTarget->GetSizeXY();
+				
+				TShaderMapRef<FSampleSpline> ComputeShader = FSampleSpline::CreateTempShaderPermutation(FSampleSpline::ESampleStep::SS_SampleSpline);
+				FSampleSpline::FParameters* PassParameters = GraphBuilder.AllocParameters<FSampleSpline::FParameters>();
+				
+				FRDGTextureRef TmpTexture_InTexture = ConvertToUVATextureFormat(GraphBuilder, TextureSizeXY, PF_FloatRGBA, TEXT("InTexture_RWTexture")); 
+				FRDGTextureUAVRef TmpTextureUAV_InTexture = GraphBuilder.CreateUAV(TmpTexture_InTexture);
+				FRDGTextureRef TmpTexture_DebugView = ConvertToUVATextureFormat(GraphBuilder, TextureSizeXY, PF_FloatRGBA, TEXT("DebugView_RWTexture")); 
+				FRDGTextureUAVRef TmpTextureUAV_DebugView = GraphBuilder.CreateUAV(TmpTexture_DebugView);
+				
+				FRDGBufferRef Tmp_SplineDataBuffer = GraphBuilder.CreateBuffer(FRDGBufferDesc::CreateBufferDesc(ElementSize, BufferNumElement), TEXT("SplineDataBuffer"));
+				GraphBuilder.QueueBufferUpload(Tmp_SplineDataBuffer, SplinePoints.GetData(), SplinePoints.Num() * ElementSize);
+				FRDGBufferUAVRef Tmp_SplineDataBufferUAV = GraphBuilder.CreateUAV(FRDGBufferUAVDesc(Tmp_SplineDataBuffer, EPixelFormat::PF_A32B32G32R32F));
+				// GraphBuilder.QueueBufferUpload(Tmp_SplineDataBufferUAV, SplinePoints.GetData(), SplinePoints.Num());
+				FRDGBufferRef Tmp_SplinePointCountBuffer = GraphBuilder.CreateBuffer(FRDGBufferDesc::CreateBufferDesc(sizeof(int32), NumSpline), TEXT("SplinePointCountBuffer"));
+				GraphBuilder.QueueBufferUpload(Tmp_SplinePointCountBuffer, SplinePointCount.GetData(), SplinePointCount.Num() * sizeof(int32));
+				FRDGBufferUAVRef Tmp_SplinePointCountBufferUAV = GraphBuilder.CreateUAV(FRDGBufferUAVDesc(Tmp_SplinePointCountBuffer, EPixelFormat::PF_R32_UINT));
+				
+				
+				PassParameters->RW_OutTexture = TmpTextureUAV_InTexture;
+				PassParameters->RW_DebugView = TmpTextureUAV_DebugView;
+				PassParameters->RW_PointsToSampleBuffer = Tmp_SplineDataBufferUAV;
+				PassParameters->RW_SplinePointCount = Tmp_SplinePointCountBufferUAV;
+				PassParameters->NumSpline = NumSpline;
+				PassParameters->BoundsMin = FVector3f(BoundMin.X, BoundMin.Y, BoundMin.Z);
+				PassParameters->BoundsSize = FVector3f(BoundSize.X, BoundSize.Y, BoundSize.Z);
+				
+				PassParameters->Sampler = TStaticSamplerState<SF_Bilinear>::GetRHI();
+				
+				GraphBuilder.AddPass(
+					RDG_EVENT_NAME("SampleSpline"),
+					PassParameters,
+					ERDGPassFlags::AsyncCompute,
+					[&PassParameters, ComputeShader, GroupCount](FRHIComputeCommandList& RHICmdList)
+					{
+						FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader, *PassParameters, GroupCount);
+					});
+
+				FRDGTextureRef InTexture =  RegisterExternalTexture(GraphBuilder, TextureTarget->GetRenderTargetTexture(), TEXT("InTexture_RT"));
+				FRDGTextureRef DebugViewTexture = RegisterExternalTexture(GraphBuilder, DebugView->GetRenderTargetTexture(), TEXT("DebugView_RT"));
+				AddCopyTexturePass(GraphBuilder, TmpTexture_DebugView, DebugViewTexture, FRHICopyTextureInfo());
+				AddCopyTexturePass(GraphBuilder, TmpTexture_InTexture, InTexture, FRHICopyTextureInfo());
+			}
+			GraphBuilder.Execute();
+		});
+		FlushRenderingCommands();
+	}
+	
+	
+	Bounds = MaxBounds;
+	return OutTransforms;
 }
 

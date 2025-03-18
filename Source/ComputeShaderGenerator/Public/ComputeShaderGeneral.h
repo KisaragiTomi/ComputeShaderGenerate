@@ -304,6 +304,7 @@ public:
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, RW_ProcssTexture0)
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, RW_ProcssTexture1)
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, RW_DebugView)
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<float4>, RW_PointsToSampleBuffer0)
 		SHADER_PARAMETER(float, InputData0)
 		SHADER_PARAMETER(int32, InputIntData0)
 		SHADER_PARAMETER(int32, InputIntData1)
@@ -347,3 +348,81 @@ public:
 };
 
 IMPLEMENT_GLOBAL_SHADER(FGeneralFunctionShader, "/OoOShaders/BasicFunction.usf", "GeneralFunctionSet", SF_Compute);
+
+
+
+class FSampleSpline : public FGlobalShader
+{
+public:
+	enum class ESampleStep : uint8
+	{
+		SS_SampleSpline,
+		SS_RasterizeSpline,
+		MAX
+	};
+	class FSampleSplineStep : SHADER_PERMUTATION_ENUM_CLASS("GeneralFunction", ESampleStep);
+	using FPermutationDomain = TShaderPermutationDomain<FSampleSplineStep>;
+
+	static TShaderMapRef<FSampleSpline> CreateTempShaderPermutation(ESampleStep Permutation)
+	{
+		typename FSampleSpline::FPermutationDomain PermutationVector;
+		PermutationVector.Set<FSampleSpline::FSampleSplineStep>(Permutation);
+		TShaderMapRef<FSampleSpline> ComputeShader(GetGlobalShaderMap(GMaxRHIFeatureLevel), PermutationVector);
+		return ComputeShader;
+	}
+	
+	//Declare this class as a global shader
+	DECLARE_GLOBAL_SHADER(FSampleSpline);
+	//Tells the engine that this shader uses a structure for its parameters
+	SHADER_USE_PARAMETER_STRUCT(FSampleSpline, FGlobalShader);
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, T_ProcssTexture)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, RW_OutTexture)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, RW_DebugView)
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWBuffer<float4>, RW_PointsToSampleBuffer)
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWBuffer<int>, RW_SplinePointCount)
+		SHADER_PARAMETER(int32, NumSpline)
+		SHADER_PARAMETER(FVector3f, BoundsMin)
+		SHADER_PARAMETER(FVector3f, BoundsSize)
+		SHADER_PARAMETER_SAMPLER(SamplerState, Sampler)
+	END_SHADER_PARAMETER_STRUCT()
+public:
+	//Called by the engine to determine which permutations to compile for this shader
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{
+		
+		return true;
+	}
+	//Modifies the compilations environment of the shader
+	static inline void ModifyCompilationEnvironment(const FGlobalShaderPermutationParameters& Parameters, FShaderCompilerEnvironment& OutEnvironment)
+	{
+		FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
+
+		//We're using it here to add some preprocessor defines. That way we don't have to change both C++ and HLSL code 
+		// when we change the value for NUM_THREADS_PER_GROUP_DIMENSION
+	
+		OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_X"), NUM_THREADS_PER_GROUP_DIMENSION_X);
+		OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_Y"), NUM_THREADS_PER_GROUP_DIMENSION_Y);
+		OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_Z"), NUM_THREADS_PER_GROUP_DIMENSION_Z);
+		
+		static const TCHAR* ShaderSourceModeDefineName[] =
+		{
+			TEXT("SS_SAMPLESPLINE"),
+			TEXT("SS_RASTERIZESPLINE"),
+		};
+		static_assert(UE_ARRAY_COUNT(ShaderSourceModeDefineName) == (uint32)ESampleStep::MAX, "Enum doesn't match define table.");
+		
+		const FPermutationDomain PermutationVector(Parameters.PermutationId);
+		const uint32 SourceModeIndex = static_cast<uint32>(PermutationVector.Get<FSampleSplineStep>());
+		OutEnvironment.SetDefine(ShaderSourceModeDefineName[SourceModeIndex], 1u);
+
+		ESampleStep BlurType = PermutationVector.Get<FSampleSplineStep>();
+		if (BlurType == ESampleStep::SS_RasterizeSpline)
+		{
+			OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_X"), 1024);
+			OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_Y"), 1);
+		}
+	}
+};
+
+IMPLEMENT_GLOBAL_SHADER(FSampleSpline, "/OoOShaders/SampleSpline.usf", "SampleSpline", SF_Compute);

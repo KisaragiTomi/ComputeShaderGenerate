@@ -226,9 +226,9 @@ void InitCalTargetHeight(uint3 DispatchThreadId, uint3 GroupThreadId, uint3 Grou
 
 groupshared half ShareMeshHeight[THREADGROUPSIZE_X][THREADGROUPSIZE_Y];
 groupshared half CompareReuslt[THREADGROUPSIZE_X][THREADGROUPSIZE_Y];
-groupshared half SceneTest[THREADGROUPSIZE_X][THREADGROUPSIZE_Y];
+groupshared half3 ShareSelectResult[THREADGROUPSIZE_X * THREADGROUPSIZE_Y];
 groupshared half4 SelectData[THREADGROUPSIZE_X][THREADGROUPSIZE_Y];
-void MeshFillVerticalRock(uint3 DispatchThreadId, uint3 GroupThreadId, uint3 GroupID)
+void MeshFillVerticalRock(uint3 DispatchThreadId, uint3 GroupThreadId, uint3 GroupID, uint GroupIndex)
 {
     float MaxCell;
     RW_CurrentSceneDepthA.GetDimensions(MaxCell, MaxCell);
@@ -345,34 +345,43 @@ void MeshFillVerticalRock(uint3 DispatchThreadId, uint3 GroupThreadId, uint3 Gro
     RW_DebugView[DispatchThreadId.xy] = float4(GenerateMaskCount, UnGenerateMaskCount, 0, 0) / MaxCount;
     
     
-    SceneTest[GroupThreadId.x][GroupThreadId.y] = RW_CurrentSceneDepthA[DispatchThreadId.xy].y;
+    
     CompareReuslt[GroupThreadId.x][GroupThreadId.y] = GenerateMaskCount > 0 ? GenerateMaskCount * MaxCount - UnGenerateMaskCount : 0;
     SelectData[GroupThreadId.x][GroupThreadId.y] = float4(Rotate, Size, TargetHeight, SelectIndex);
+    ShareSelectResult[GroupIndex] = float3(CompareReuslt[GroupThreadId.x][GroupThreadId.y], GroupThreadId.x, GroupThreadId.y);
     
     GroupMemoryBarrierWithGroupSync();
     
     float4 DebugValue = float4(GenerateMaskCount, UnGenerateMaskCount, 0, 0);
-    
-    if (GroupThreadId.x != 0 || GroupThreadId.y != 0) return;
-    
-    //TODO Select Multiple potentially valid pixels
     float3 SelectResult = float3(0, 0, 0);
-    LOOP
-    for(float Y = 0; Y < MaxIndex; Y++)
-    {
-        for(float X = 0; X < MaxIndex; X++)
-        {
-            float ResultValue = CompareReuslt[X][Y];
-            float CurrentValuse = SelectResult.x;
-            SelectResult = ResultValue > CurrentValuse? float3(ResultValue, X, Y) : SelectResult;
+    // if (GroupThreadId.x != 0 || GroupThreadId.y != 0) return;
+    //
+    // //TODO Select Multiple potentially valid pixels
 
-            // uint2 SelectResultIndex = uint2(GroupID.x * MaxIndex + X, GroupID.y * MaxIndex + Y);
-            uint2 SelectResultIndex = uint2(GroupID.x * MaxIndex + X, GroupID.y * MaxIndex + Y);
-            RW_DebugView[SelectResultIndex].z = 1;
+    // LOOP
+    // for(float Y = 0; Y < MaxIndex; Y++)
+    // {
+    //     for(float X = 0; X < MaxIndex; X++)
+    //     {
+    //         float ResultValue = CompareReuslt[X][Y];
+    //         float CurrentValuse = SelectResult.x;
+    //         SelectResult = ResultValue > CurrentValuse? float3(ResultValue, X, Y) : SelectResult;
+    //     }
+    // }
+    //
+    for (uint stride = THREADGROUPSIZE_X * THREADGROUPSIZE_X / 2; stride > 0; stride >>= 1) {
+        if (GroupIndex < stride)
+        {
+            float3 CurrentValue = ShareSelectResult[GroupIndex];
+            float3 CompareValue = ShareSelectResult[GroupIndex + stride];
+            float CompareVaildCount = CompareValue.x;
+            float CurrentVaildCount = CurrentValue.x;
+            SelectResult = CompareVaildCount > CurrentVaildCount? CompareValue : CurrentValue;
         }
+        GroupMemoryBarrierWithGroupSync();
     }
     
-    if (SelectResult.x == 0 ) return;
+    if (GroupIndex != 0 && SelectResult.x == 0 ) return;
     
     float ResultValue = SelectResult.x;
     float ResultIndexX = SelectResult.y;
@@ -589,7 +598,7 @@ void MeshFillMult(
 #elif FMESHFILL_FINDBESTPIXELRW_256
     FindBestPixelInRW(DispatchThreadId, GroupThreadId, GroupId, GroupIndex);
 #elif  FMESHFILL_FILLVERTICALROCK
-    MeshFillVerticalRock(DispatchThreadId, GroupThreadId, GroupId);
+    MeshFillVerticalRock(DispatchThreadId, GroupThreadId, GroupId, GroupIndex);
 #elif FMESHFILL_FILLCAPPINGROCK
 
 #elif FMESHFILL_TARGETHEIGHT

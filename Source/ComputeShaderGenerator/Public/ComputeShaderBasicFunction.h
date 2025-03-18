@@ -6,8 +6,15 @@
 #include "Kismet/BlueprintAsyncActionBase.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "Components/BoxComponent.h"
+#include "Components/SplineComponent.h"
 
 #include "ComputeShaderBasicFunction.generated.h"
+
+
+struct FCSSPlinePointData
+{
+	TArray<TArray<FLinearColor>> PointData;
+};
 
 UCLASS()
 class COMPUTESHADERGENERATOR_API UComputeShaderBasicFunction : public UBlueprintFunctionLibrary
@@ -50,5 +57,10 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "ComputeShader")
 	static void ExtentMaskFast(UTextureRenderTarget2D* InTextureTarget, UTextureRenderTarget2D* InDebugView, int32 Channel = 0, int32 NumExtend = 1);
+	
+	UFUNCTION(BlueprintCallable, Category = "ComputeShader")
+	static TArray<FTransform> SampleSpline(UTextureRenderTarget2D* InTextureTarget, UTextureRenderTarget2D* InDebugView,
+	                                       TArray<USplineComponent*>
+	                                       InSplineComponents, FBoxSphereBounds& Bounds, int32 TextureSize = 256, float Interval = 50);
 };
 
