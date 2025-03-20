@@ -51,9 +51,10 @@ inline void ACSCliffGenerateCapture::GenerateCliffVertical(int32 NumIteration, f
 	InCurrentSceneDepth->ResizeTarget(TextureSize, TextureSize);
 	InHeightNormal->ResizeTarget(TextureSize, TextureSize);
 	InTargetHeight->ResizeTarget(TextureSize, TextureSize);
+	InHeightData->ResizeTarget(TextureSize, TextureSize);
 
 	SpawnSize = InSpawnSize;
-	TArray<FCSCliffGenerateData> GenerateDatas;
+	TArray<FCSMeshFillData> GenerateDatas;
 	GenerateDatas.Reserve(NumIteration);
 	for (int32 i = 0; i < NumIteration; i++)
 	{
@@ -61,7 +62,7 @@ inline void ACSCliffGenerateCapture::GenerateCliffVertical(int32 NumIteration, f
 		// float RandomRotate = FMath::FRandRange(0.0, 7.0);
 		// float RandomHeightOffset = FMath::FRandRange(-350.0, 550.0) * (SelectIndex > 1);
 		
-		FCSCliffGenerateData GenerateData;
+		FCSMeshFillData GenerateData;
 		GenerateData.SelectIndex = SelectIndex;
 		GenerateData.RandomScale = MeshDataAssets[SelectIndex]->RandomScale;
 		GenerateData.RandomRotate = MeshDataAssets[SelectIndex]->RandomRotate;
@@ -299,7 +300,7 @@ void ACSCliffGenerateCapture::GenerateTargetHeightCal()
 }
 
 
-void ACSCliffGenerateCapture::GenerateCliffVerticalCal(TArray<FCSCliffGenerateData> GenerateDatas)
+void ACSCliffGenerateCapture::GenerateCliffVerticalCal(TArray<FCSMeshFillData> GenerateDatas)
 {
 	if (!IsParameterValidMult() || GenerateDatas.Num() == 0) return;
 	
@@ -373,9 +374,9 @@ void ACSCliffGenerateCapture::GenerateCliffVerticalCal(TArray<FCSCliffGenerateDa
 			FRDGTextureRef TmpTexture_Result = ConvertToUVATextureFormat(GraphBuilder, Result, PF_FloatRGBA, TEXT("Result_Texture")); 
 			FRDGTextureUAVRef TmpTextureUAV_Result = GraphBuilder.CreateUAV(TmpTexture_Result);
 			
-			FRDGTextureRef TmpTexture_ResultA = ConvertToUVATextureFormat(GraphBuilder, Result, PF_A32B32G32R32F, TEXT("ResultA_Texture")); 
+			FRDGTextureRef TmpTexture_ResultA = ConvertToUVATextureFormat(GraphBuilder, Result, PF_FloatRGBA, TEXT("ResultA_Texture")); 
 			FRDGTextureUAVRef TmpTextureUAV_ResultA = GraphBuilder.CreateUAV(TmpTexture_ResultA);
-			FRDGTextureRef TmpTexture_ResultB = ConvertToUVATextureFormat(GraphBuilder, Result, PF_A32B32G32R32F, TEXT("ResultB_Texture")); 
+			FRDGTextureRef TmpTexture_ResultB = ConvertToUVATextureFormat(GraphBuilder, Result, PF_FloatRGBA, TEXT("ResultB_Texture")); 
 			FRDGTextureUAVRef TmpTextureUAV_ResultB = GraphBuilder.CreateUAV(TmpTexture_ResultB);
 
 			

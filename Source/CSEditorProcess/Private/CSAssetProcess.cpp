@@ -30,7 +30,8 @@
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetToolsModule.h"
-
+#include "ComputeShaderBasicFunction.h"
+#include "Runtime/Renderer/Private/ScenePrivate.h"
 
 
 class FAssetRegistryModule;
@@ -255,4 +256,22 @@ void UCSAssetProcess::CalculateMeshHeight(AStaticMeshActor* InMeshActor,  UTextu
 
 	
 	NewRenderTarget2D = nullptr;
+}
+
+void UCSAssetProcess::GetDistanceToNearestSurface(UTextureRenderTarget2D* InDebugView)
+{
+	FEditorViewportClient* EditorViewportClient = StaticCast<FEditorViewportClient*>(GEditor->GetActiveViewport()->GetClient());
+	FViewport* Viewport = EditorViewportClient->Viewport;
+	FSceneViewFamilyContext ViewFamily(FSceneViewFamily::ConstructionValues(Viewport, EditorViewportClient->GetScene(), EditorViewportClient->EngineShowFlags));
+	// ViewFamily.viewinf
+	// FSceneRenderer
+	FSceneView* SceneView = EditorViewportClient->CalcSceneView(&ViewFamily);
+	SceneView->Family->GetSceneRenderer()->GetSceneUniforms();
+	// FScene* Scene;
+	// // FDistanceFieldSceneData& DFData = Scene->DistanceFieldSceneData;
+	// Scene->GetRenderScene();
+	
+	// SceneView
+	// SceneView->bIsViewInfo
+	UComputeShaderBasicFunction::CalDistanceToNearestSurface(SceneView, InDebugView);
 }

@@ -1,6 +1,7 @@
 //#pragma
 
 #include "/Engine/Public/Platform.ush"
+
 #include "General.usf"
 
 #ifndef THREADGROUPSIZE_X
@@ -495,7 +496,8 @@ void AttributeFromSpline(uint3 DispatchThreadId, uint3 GroupThreadId, uint3 Grou
 	// SampleResult.z = SampleResult.z < 1;
 	RW_OutTexture[DispatchThreadId.xy] = SampleResult;
 	RW_DebugView[DispatchThreadId.xy] = 1;
-
+	
+	
 }
 
 void RasterizeSpline(uint3 DispatchThreadId, uint3 GroupThreadId, uint3 GroupId, uint GroupIndex)
@@ -507,6 +509,7 @@ void RasterizeSpline(uint3 DispatchThreadId, uint3 GroupThreadId, uint3 GroupId,
 	float2 UV = (RW_PointsToSampleBuffer[DispatchThreadId.x].xy - BoundsMin.xy) / BoundsSize.xy;
 	RW_OutTexture[uint2(UV * MaxCell)] = 11;
 	// RW_OutTexture[uint2(DispatchThreadId.x, 0)].x = UV.x > 1;
+	
 }
 
 [numthreads(THREADGROUPSIZE_X, THREADGROUPSIZE_Y, THREADGROUPSIZE_Z)]

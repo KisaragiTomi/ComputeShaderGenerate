@@ -19,4 +19,7 @@ class CSEDITORPROCESS_API UCSAssetProcess : public UBlueprintFunctionLibrary
 
 	UFUNCTION(BlueprintCallable, Category = "ComputeShader")
 	static void CalculateMeshHeight(AStaticMeshActor* InMeshActor, UTextureRenderTarget2D* NewRenderTarget2D);
+
+	UFUNCTION(BlueprintCallable, Category = "ComputeShader")
+	static void GetDistanceToNearestSurface(UTextureRenderTarget2D* InDebugView);
 };

@@ -354,32 +354,32 @@ void MeshFillVerticalRock(uint3 DispatchThreadId, uint3 GroupThreadId, uint3 Gro
     
     float4 DebugValue = float4(GenerateMaskCount, UnGenerateMaskCount, 0, 0);
     float3 SelectResult = float3(0, 0, 0);
-    // if (GroupThreadId.x != 0 || GroupThreadId.y != 0) return;
-    //
-    // //TODO Select Multiple potentially valid pixels
+    if (GroupThreadId.x != 0 || GroupThreadId.y != 0) return;
+    
+    //TODO Select Multiple potentially valid pixels
 
-    // LOOP
-    // for(float Y = 0; Y < MaxIndex; Y++)
-    // {
-    //     for(float X = 0; X < MaxIndex; X++)
-    //     {
-    //         float ResultValue = CompareReuslt[X][Y];
-    //         float CurrentValuse = SelectResult.x;
-    //         SelectResult = ResultValue > CurrentValuse? float3(ResultValue, X, Y) : SelectResult;
-    //     }
-    // }
-    //
-    for (uint stride = THREADGROUPSIZE_X * THREADGROUPSIZE_X / 2; stride > 0; stride >>= 1) {
-        if (GroupIndex < stride)
+    LOOP
+    for(float Y = 0; Y < MaxIndex; Y++)
+    {
+        for(float X = 0; X < MaxIndex; X++)
         {
-            float3 CurrentValue = ShareSelectResult[GroupIndex];
-            float3 CompareValue = ShareSelectResult[GroupIndex + stride];
-            float CompareVaildCount = CompareValue.x;
-            float CurrentVaildCount = CurrentValue.x;
-            SelectResult = CompareVaildCount > CurrentVaildCount? CompareValue : CurrentValue;
+            float ResultValue = CompareReuslt[X][Y];
+            float CurrentValuse = SelectResult.x;
+            SelectResult = ResultValue > CurrentValuse? float3(ResultValue, X, Y) : SelectResult;
         }
-        GroupMemoryBarrierWithGroupSync();
     }
+    
+    // for (uint stride = THREADGROUPSIZE_X * THREADGROUPSIZE_X / 2; stride > 0; stride >>= 1) {
+    //     if (GroupIndex < stride)
+    //     {
+    //         float3 CurrentValue = ShareSelectResult[GroupIndex];
+    //         float3 CompareValue = ShareSelectResult[GroupIndex + stride];
+    //         float CompareVaildCount = CompareValue.x;
+    //         float CurrentVaildCount = CurrentValue.x;
+    //         SelectResult = CompareVaildCount > CurrentVaildCount? CompareValue : CurrentValue;
+    //     }
+    //     GroupMemoryBarrierWithGroupSync();
+    // }
     
     if (GroupIndex != 0 && SelectResult.x == 0 ) return;
     

@@ -1,6 +1,24 @@
 //#pragma
 
 #include "/Engine/Public/Platform.ush"
+#include "/Engine/Private/ComputeShaderUtils.ush"
+
+
+#if USE_DISTANCEFIELD
+#include "/Engine/Private/Common.ush"
+#include "/Engine/Private/DistanceField/GlobalDistanceFieldShared.ush"
+#endif
+// #include "/Engine/Generated/GeneratedUniformBuffers.ush"
+
+// #include "/Engine/Private/DeferredShadingCommon.ush"
+
+
+// #include "/Engine/Private/DistanceField/GlobalDistanceFieldUtils.ush"
+// #include "/Engine/Private/DistanceField/GlobalDistanceFieldObjectGrid.ush"
+// #include "/Engine/Private/DistanceFieldLightingShared.ush"
+// #include "/Engine/Private/SceneData.ush"
+// #include "/Engine/Private/Random.ush"
+
 #include "General.usf"
 
 #ifndef THREADGROUPSIZE_X
@@ -255,8 +273,7 @@ void ProcessHeightTexture(uint3 DispatchThreadId)
 
 void TextureArrayTest(uint3 DispatchThreadId)
 {
-	
-	RW_ProcssTexture0[DispatchThreadId.xy].x = TA_ProcssTexture0[DispatchThreadId].x;
+
 }
 
 
@@ -374,4 +391,25 @@ void GeneralFunctionSet(
 
 #endif
 
+}
+
+void DistanceToNearestSurface(uint3 DispatchThreadId, uint3 GroupThreadId, uint3 GroupId, uint GroupIndex)
+{
+#if USE_DISTANCEFIELD
+	RW_DebugView[DispatchThreadId.xy].x = GetDistanceToNearestSurfaceGlobal(float3(DispatchThreadId.xy, 0) * 10);
+#endif
+}	
+
+[numthreads(THREADGROUPSIZE_X, THREADGROUPSIZE_Y, THREADGROUPSIZE_Z)]
+void DistanceFieldFunction(
+						uint3 GroupId : SV_GroupID,
+						uint3 DispatchThreadId : SV_DispatchThreadID,
+						uint3 GroupThreadId : SV_GroupThreadID,
+						uint GroupIndex : SV_GroupIndex)
+{
+#if GDF_DISTANCETONEARESTSURFACE
+	DistanceToNearestSurface(DispatchThreadId, GroupThreadId, GroupId, GroupIndex);
+#endif
+	
+	
 }

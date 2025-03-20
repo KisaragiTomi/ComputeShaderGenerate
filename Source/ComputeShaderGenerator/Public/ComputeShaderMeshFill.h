@@ -19,7 +19,20 @@
 #define NUM_SAMPLE_MESH_THREADS_PER_GROUP_DIMENSION_Z 1
 #define SHAREGROUP_FINDEXT_SIZE 256
 
+USTRUCT()
+struct COMPUTESHADERGENERATOR_API FCSMeshFillData
+{
+	GENERATED_USTRUCT_BODY()
+public:
+	
+	FVector2D RandomRotate = FVector2D(0, 0);
+	FVector2D RandomScale = FVector2D(1, 1);
+	FVector2D RandomHeightOffset = FVector2D(0, 0);
+	float DrawScale = 1;
+	float SpawnScaleMult = 1;
+	int32 SelectIndex = -1;
 
+};
 
 class FMeshFillMult : public FGlobalShader
 {
@@ -206,6 +219,76 @@ public:
 			SceneNormal != nullptr && DebugView != nullptr && Result != nullptr ;
 	}
 };
+
+UCLASS()
+class COMPUTESHADERGENERATOR_API ACSFillTarget : public ACSGenerateCaptureScene
+{
+	GENERATED_BODY()
+public:
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FillTarget")
+	UTextureRenderTarget2D* InMask;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FillTarget")
+	UTextureRenderTarget2D* InHeightData;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FillTarget")
+	UTextureRenderTarget2D* InHeightNormal;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FillTarget")
+	UTextureRenderTarget2D* InDebugView;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FillTarget")
+	UTextureRenderTarget2D* InResult;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FillTarget")
+	UTexture2DArray* InMeshHeightArray;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FillTarget")
+	UTextureRenderTarget2D* InCurrentSceneDepth;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FillTarget")
+	UTextureRenderTarget2D* InConectivityClassifiy;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FillTarget")
+	UTextureRenderTarget2D* InTargetHeight;
+
+	
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FillTarget")
+	float SpawnSize = 1;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FillTarget")
+	float RandomRoation = 0;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FillTarget")
+	FName Tag = FName(TEXT("Auto"));
+
+
+
+
+	ACSFillTarget();
+
+	virtual void OnConstruction(const FTransform& Transform) override;
+	
+	bool IsParameterValidMult()
+	{
+		bool Check = true;
+		if (InMeshHeightArray == nullptr) Check = false;
+		if (MeshDataAssets.Num() == 0) Check = false;
+		if (InSceneDepth == nullptr) Check = false;
+		if (InSceneNormal == nullptr) Check = false;
+		if (InDebugView == nullptr) Check = false;
+		if (InResult == nullptr) Check = false;
+		if (InCurrentSceneDepth == nullptr) Check = false;
+		return Check;
+	}
+
+	void FillTargetCal(TArray<FCSMeshFillData> GenerateDatas);
+
+	UFUNCTION(BlueprintCallable, Category = "ComputeShader")
+	void FillTarget(int32 NumIteration = 1, float InSpawnSize = 1);
+
+	// UFUNCTION(BlueprintCallable, Category = "ComputeShader")
+	// void GenerateTargetHeightCal();
+	
+	
+};
+
+
 
 UCLASS()
 class COMPUTESHADERGENERATOR_API UComputeShaderMeshFillFunctions : public UBlueprintFunctionLibrary

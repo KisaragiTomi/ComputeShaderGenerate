@@ -9,6 +9,7 @@
 #include "RenderTargetPool.h"
 #include "ComputeShaderGenerateHepler.h"
 #include "EngineUtils.h"
+#include "GlobalDistanceFieldParameters.h"
 
 
 #define NUM_THREADS_PER_GROUP_DIMENSION_X 32
@@ -344,6 +345,12 @@ public:
 		const FPermutationDomain PermutationVector(Parameters.PermutationId);
 		const uint32 SourceModeIndex = static_cast<uint32>(PermutationVector.Get<FGeneralFunctionSet>());
 		OutEnvironment.SetDefine(ShaderSourceModeDefineName[SourceModeIndex], 1u);
+
+		ETempShader FunctionSelect = PermutationVector.Get<FGeneralFunctionSet>();
+		if (FunctionSelect == ETempShader::GTS_TextureArrayTest)
+		{
+			OutEnvironment.SetDefine(TEXT("USE_DISTANCEFIELD"), 1);
+		}
 	}
 };
 
@@ -426,3 +433,80 @@ public:
 };
 
 IMPLEMENT_GLOBAL_SHADER(FSampleSpline, "/OoOShaders/SampleSpline.usf", "SampleSpline", SF_Compute);
+
+
+class FGlobalDistanceFieldForCS : public FGlobalShader
+{
+public:
+	enum class ESDFShader : uint8
+	{
+		GDF_DistanceToNearestSurface,
+		MAX
+	};
+	class FSDFSet : SHADER_PERMUTATION_ENUM_CLASS("GlobalDistanceFieldForCS", ESDFShader);
+	using FPermutationDomain = TShaderPermutationDomain<FSDFSet>;
+
+	static TShaderMapRef<FGlobalDistanceFieldForCS> CreateTempShaderPermutation(ESDFShader Permutation)
+	{
+		typename FGlobalDistanceFieldForCS::FPermutationDomain PermutationVector;
+		PermutationVector.Set<FGlobalDistanceFieldForCS::FSDFSet>(Permutation);
+		TShaderMapRef<FGlobalDistanceFieldForCS> ComputeShader(GetGlobalShaderMap(GMaxRHIFeatureLevel), PermutationVector);
+		return ComputeShader;
+	}
+	
+	//Declare this class as a global shader
+	DECLARE_GLOBAL_SHADER(FGlobalDistanceFieldForCS);
+	//Tells the engine that this shader uses a structure for its parameters
+	SHADER_USE_PARAMETER_STRUCT(FGlobalDistanceFieldForCS, FGlobalShader);
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, T_ProcssTexture0)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, RW_OutTexture)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, RW_ProcssTexture1)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, RW_DebugView)
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<float4>, RW_PointsToSampleBuffer0)
+		SHADER_PARAMETER(float, InputData0)
+		SHADER_PARAMETER(int32, InputIntData0)
+		SHADER_PARAMETER(int32, InputIntData1)
+		SHADER_PARAMETER_STRUCT_INCLUDE(FGlobalDistanceFieldParameters2, GlobalDistanceFieldParameters)
+		SHADER_PARAMETER_STRUCT_REF(FViewUniformShaderParameters, View)
+		SHADER_PARAMETER_SAMPLER(SamplerState, Sampler)
+	END_SHADER_PARAMETER_STRUCT()
+public:
+	//Called by the engine to determine which permutations to compile for this shader
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{
+		
+		return true;
+	}
+	//Modifies the compilations environment of the shader
+	static inline void ModifyCompilationEnvironment(const FGlobalShaderPermutationParameters& Parameters, FShaderCompilerEnvironment& OutEnvironment)
+	{
+		FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
+
+		//We're using it here to add some preprocessor defines. That way we don't have to change both C++ and HLSL code 
+		// when we change the value for NUM_THREADS_PER_GROUP_DIMENSION
+	
+		OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_X"), NUM_THREADS_PER_GROUP_DIMENSION_X);
+		OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_Y"), NUM_THREADS_PER_GROUP_DIMENSION_Y);
+		OutEnvironment.SetDefine(TEXT("THREADGROUPSIZE_Z"), NUM_THREADS_PER_GROUP_DIMENSION_Z);
+		OutEnvironment.SetDefine(TEXT("USE_DISTANCEFIELD"), 1);
+		
+		static const TCHAR* ShaderSourceModeDefineName[] =
+		{
+			TEXT("GDF_DISTANCETONEARESTSURFACE"),
+		};
+		static_assert(UE_ARRAY_COUNT(ShaderSourceModeDefineName) == (uint32)ESDFShader::MAX, "Enum doesn't match define table.");
+		
+		const FPermutationDomain PermutationVector(Parameters.PermutationId);
+		const uint32 SourceModeIndex = static_cast<uint32>(PermutationVector.Get<FSDFSet>());
+		OutEnvironment.SetDefine(ShaderSourceModeDefineName[SourceModeIndex], 1u);
+
+		ESDFShader FunctionSelect = PermutationVector.Get<FSDFSet>();
+		if (FunctionSelect == ESDFShader::GDF_DistanceToNearestSurface)
+		{
+			OutEnvironment.SetDefine(TEXT("USE_DISTANCEFIELD"), 1);
+		}
+	}
+};
+
+IMPLEMENT_GLOBAL_SHADER(FGlobalDistanceFieldForCS, "/OoOShaders/BasicFunction.usf", "GeneralFunctionSet", SF_Compute);

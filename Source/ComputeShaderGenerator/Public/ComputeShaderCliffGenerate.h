@@ -2,6 +2,7 @@
 //
 #include "CoreMinimal.h"
 #include "Engine/TextureRenderTarget2D.h"
+#include "ComputeShaderMeshFill.h"
 #include "ComputeShaderSceneCapture.h"
 //
 #include "ComputeShaderCliffGenerate.generated.h"
@@ -9,20 +10,7 @@
 //
 // //This struct act as a container for all the parameters that the client needs to pass to the Compute Shader Manager.
 
-USTRUCT()
-struct COMPUTESHADERGENERATOR_API FCSCliffGenerateData
-{
-	GENERATED_USTRUCT_BODY()
-public:
-	
-	FVector2D RandomRotate = FVector2D(0, 0);
-	FVector2D RandomScale = FVector2D(1, 1);
-	FVector2D RandomHeightOffset = FVector2D(0, 0);
-	float DrawScale = 1;
-	float SpawnScaleMult = 1;
-	int32 SelectIndex = -1;
 
-};
 
 UCLASS()
 class COMPUTESHADERGENERATOR_API ACSCliffGenerateCapture : public ACSGenerateCaptureScene
@@ -71,13 +59,19 @@ public:
 	bool IsParameterValidMult()
 	{
 		bool Check = true;
-		if (InMeshHeightArray == nullptr) Check = false; 
-		return MeshDataAssets.Num() > 0 && InSceneDepth != nullptr &&
-			InSceneNormal != nullptr && InDebugView != nullptr && InResult != nullptr &&
-			InCurrentSceneDepth != nullptr;
+		if (MeshDataAssets.Num() == 0) Check = false;
+		if (InHeightNormal == nullptr) Check = false;
+		if (InMeshHeightArray == nullptr) Check = false;
+		if (InHeightData == nullptr) Check = false;
+		if (InSceneDepth == nullptr) Check = false;
+		if (InSceneNormal == nullptr) Check = false;
+		if (InDebugView == nullptr) Check = false;
+		if (InResult == nullptr) Check = false;
+		if (InCurrentSceneDepth == nullptr) Check = false;
+		return Check;
 	}
 
-	void GenerateCliffVerticalCal(TArray<FCSCliffGenerateData> GenerateDatas);
+	void GenerateCliffVerticalCal(TArray<FCSMeshFillData> GenerateDatas);
 
 	UFUNCTION(BlueprintCallable, Category = "ComputeShader")
 	void GenerateCliffVertical(int32 NumIteration = 1, float InSpawnSize = 1);

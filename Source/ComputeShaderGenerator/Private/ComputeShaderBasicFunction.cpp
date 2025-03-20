@@ -14,10 +14,14 @@
 #include "Engine/StaticMeshActor.h"
 #include "Kismet/KismetRenderingLibrary.h"
 #include "ComputeShaderGeneral.h"
+#include "EngineModule.h"
 #include "LandscapeExtra.h"
+#include "../../../../../../../../UnrealEngine-5.4.4-release/Engine/Plugins/Runtime/nDisplay/Source/DisplayClusterConfiguration/Public/DisplayClusterConfigurationStrings.h"
 #include "Components/SplineComponent.h"
 #include "Engine/Texture2DArray.h"
 #include "GeometryScript/PolyPathFunctions.h"
+#include "Runtime/Renderer/Private/ScenePrivate.h"
+#include "Slate/SceneViewport.h"
 
 DECLARE_STATS_GROUP(TEXT("TestTime"), STATGROUP_CSTest, STATCAT_Advanced);
 DECLARE_CYCLE_STAT(TEXT("CS Execute"), STAT_CSTest_Execute, STATGROUP_CSTest)
@@ -155,7 +159,7 @@ void UComputeShaderBasicFunction::ConnectivityPixel(UTextureRenderTarget2D* InTe
 
 					});
 				}
-				
+				// ERDGPassFlags::Raster
 				GraphBuilder.AddPass(
 					RDG_EVENT_NAME("Count"),
 					PassParameters,
@@ -415,25 +419,55 @@ void UComputeShaderBasicFunction::Test(UTexture2DArray* InArray, UTexture2D* InT
 	InArray->SourceTextures.Empty();
 	TestArray->SourceTextures.Add(InTexture);
 	TestArray->UpdateSourceFromSourceTextures();
-		
+	UGameViewportClient* ViewportClient = GWorld->GetGameViewport();
+	// ViewportClient->GetMousePosition();
+	ViewportClient->Viewport ;
+	FSceneViewport* SceneViewport = ViewportClient->GetGameViewport();
+	// FSceneViewFamilyContext ViewFamily(FSceneViewFamily::ConstructionValues(nullptr, nullptr, FEngineShowFlags(ESFIM_Game))
+	// 							.SetTime(FGameTime()));
+	// FSceneView* View = ViewportClient->CalcSceneView()
+	APlayerController* PC = GWorld->GetFirstPlayerController();
+	FVector CameraLocation;
+	FRotator CameraRotation;
+	PC->PlayerCameraManager->GetCameraViewPoint(CameraLocation, CameraRotation);
+    
+	// 设置视图参数
+	// FSceneViewInitOptions ViewInitOptions;
+	// ViewInitOptions.ViewFamily = &ViewFamily;
+	// ViewInitOptions.SetViewRectangle(ViewRect);
+	// ViewInitOptions.ViewOrigin = -Origin;
+	// ViewInitOptions.ViewRotationMatrix = ViewRotationMatrix;
+	// ViewInitOptions.ProjectionMatrix = ProjectionMatrix;
+	// ViewInitOptions.BackgroundColor = FLinearColor::Black;
+	//
+	// FSceneView* NewView = new FSceneView(ViewInitOptions);
+	
+
+
+
+	
+	// SceneViewport->view
+	// GWorld->EditorViews
 	FRenderTarget* DebugView = InDebugView->GameThread_GetRenderTargetResource();
 	ENQUEUE_RENDER_COMMAND(SceneDrawCompletion)(
 	[=](FRHICommandListImmediate& RHICmdList)
 	{
 		FRDGBuilder GraphBuilder(RHICmdList);
 		{
-			TShaderMapRef<FGeneralFunctionShader> ComputeShader = FGeneralFunctionShader::CreateTempShaderPermutation(FGeneralFunctionShader::ETempShader::GTS_TextureArrayTest);
-
-			FGeneralFunctionShader::FParameters* PassParameters = GraphBuilder.AllocParameters<FGeneralFunctionShader::FParameters>();
-			auto GroupCount = FComputeShaderUtils::GetGroupCount(FIntVector(TestArray->GetSizeX(), TestArray->GetSizeY(), 1), FComputeShaderUtils::kGolden2DGroupSize);
+			TShaderMapRef<FGlobalDistanceFieldForCS> ComputeShader = FGlobalDistanceFieldForCS::CreateTempShaderPermutation(FGlobalDistanceFieldForCS::ESDFShader::GDF_DistanceToNearestSurface);
+			FGlobalDistanceFieldForCS::FParameters* PassParameters = GraphBuilder.AllocParameters<FGlobalDistanceFieldForCS::FParameters>();
+			
+			FIntVector GroupCount = FComputeShaderUtils::GetGroupCount(FIntVector(TestArray->GetSizeX(), TestArray->GetSizeY(), 1), 32);
 			
 			FRDGTextureRef TmpTexture_DebugView = CSHepler::ConvertToUVATexture(DebugView, GraphBuilder);
 			FRDGTextureRef DebugViewTexture = RegisterExternalTexture(GraphBuilder, DebugView->GetRenderTargetTexture(), TEXT("DebugView_RT"));
 			FRDGTextureRef TextureArray = RegisterExternalTexture(GraphBuilder, TestArray->GetResource()->GetTextureRHI(), TEXT("Input_TA"));
-			PassParameters->TA_ProcssTexture0 = TextureArray;
-			PassParameters->RW_ProcssTexture0 = GraphBuilder.CreateUAV(TmpTexture_DebugView);
-			// PassParameters->InputData0 = 1;
+
+			PassParameters->RW_DebugView = GraphBuilder.CreateUAV(TmpTexture_DebugView);
+			
 			PassParameters->Sampler	= TStaticSamplerState<SF_Bilinear>::GetRHI();
+
+			
 
 			
 			GraphBuilder.AddPass(
@@ -442,7 +476,7 @@ void UComputeShaderBasicFunction::Test(UTexture2DArray* InArray, UTexture2D* InT
 				ERDGPassFlags::AsyncCompute,
 				[&PassParameters, ComputeShader, GroupCount](FRHIComputeCommandList& RHICmdList)
 				{
-					FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader, *PassParameters, GroupCount);
+
 				});
 			
 			AddCopyTexturePass(GraphBuilder, TmpTexture_DebugView, DebugViewTexture, FRHICopyTextureInfo());
@@ -709,5 +743,64 @@ TArray<FTransform> UComputeShaderBasicFunction::SampleSpline(UTextureRenderTarge
 	
 	Bounds = MaxBounds;
 	return OutTransforms;
+}
+
+void UComputeShaderBasicFunction::CalDistanceToNearestSurface(FSceneView* SceneView, UTextureRenderTarget2D* InDebugView)
+{
+	// FScene* Scene;
+	// Scene->ViewStates.view
+	// Scene->DistanceFieldSceneData.
+	// scene
+	// GlobalDistanceFieldInfo()
+	
+	FRenderTarget* DebugView = InDebugView->GameThread_GetRenderTargetResource();
+	ENQUEUE_RENDER_COMMAND(SceneDrawCompletion)(
+	[=](FRHICommandListImmediate& RHICmdList)
+	{
+		FRDGBuilder GraphBuilder(RHICmdList);
+		{
+			TShaderMapRef<FGlobalDistanceFieldForCS> ComputeShader = FGlobalDistanceFieldForCS::CreateTempShaderPermutation(FGlobalDistanceFieldForCS::ESDFShader::GDF_DistanceToNearestSurface);
+			FGlobalDistanceFieldForCS::FParameters* PassParameters = GraphBuilder.AllocParameters<FGlobalDistanceFieldForCS::FParameters>();
+			
+			FIntVector GroupCount = FComputeShaderUtils::GetGroupCount(FIntVector(DebugView->GetSizeXY().X, DebugView->GetSizeXY().Y, 1), 32);
+			
+			FRDGTextureRef TmpTexture_DebugView = CSHepler::ConvertToUVATexture(DebugView, GraphBuilder);
+			FRDGTextureRef DebugViewTexture = RegisterExternalTexture(GraphBuilder, DebugView->GetRenderTargetTexture(), TEXT("DebugView_RT"));
+			FRDGTextureRef TextureArray = RegisterExternalTexture(GraphBuilder, InDebugView->GetResource()->GetTextureRHI(), TEXT("Input_TA"));
+
+			PassParameters->RW_DebugView = GraphBuilder.CreateUAV(TmpTexture_DebugView);
+			
+			PassParameters->Sampler	= TStaticSamplerState<SF_Bilinear>::GetRHI();
+
+			
+			TUniformBufferRef<FViewUniformShaderParameters> ViewUniformBuffer = SceneView->ViewUniformBuffer;
+			const FGlobalDistanceFieldParameterData* GlobalDistanceFieldParameterData = GetRendererModule().GetGlobalDistanceFieldParameterData(*SceneView);
+			TSet<FSceneInterface*> FSISet = GetRendererModule().GetAllocatedScenes();
+			FSceneInterface* FSI;
+			FSI->get
+			// GetRendererModule().renderer
+			// FScene* Scene;
+			// Scene->DistanceFieldSceneData
+// Scene->DistanceFieldSceneData.distance
+			GraphBuilder.AddPass(
+				RDG_EVENT_NAME("ExecuteExampleComputeShader"),
+				PassParameters,
+				ERDGPassFlags::AsyncCompute,
+				[&PassParameters, ComputeShader, GroupCount, ViewUniformBuffer, GlobalDistanceFieldParameterData](FRHIComputeCommandList& RHICmdList)
+				{
+					PassParameters->View = ViewUniformBuffer;
+					PassParameters->GlobalDistanceFieldParameters = SetupGlobalDistanceFieldParameters_Minimal(*GlobalDistanceFieldParameterData);
+					PassParameters->GlobalDistanceFieldParameters.GlobalDistanceFieldCoverageAtlasTextureSampler = TStaticSamplerState<SF_Trilinear, AM_Wrap, AM_Wrap, AM_Wrap>::GetRHI();
+					PassParameters->GlobalDistanceFieldParameters.GlobalDistanceFieldPageAtlasTextureSampler = TStaticSamplerState<SF_Trilinear, AM_Wrap, AM_Wrap, AM_Wrap>::GetRHI();
+					PassParameters->GlobalDistanceFieldParameters.GlobalDistanceFieldMipTextureSampler = TStaticSamplerState<SF_Trilinear, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI();
+					FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader, *PassParameters, GroupCount);
+				});
+			
+			AddCopyTexturePass(GraphBuilder, TmpTexture_DebugView, DebugViewTexture, FRHICopyTextureInfo());
+		}
+		GraphBuilder.Execute();
+
+	});
+	
 }
 

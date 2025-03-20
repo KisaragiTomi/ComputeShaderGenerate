@@ -62,5 +62,8 @@ public:
 	static TArray<FTransform> SampleSpline(UTextureRenderTarget2D* InTextureTarget, UTextureRenderTarget2D* InDebugView,
 	                                       TArray<USplineComponent*>
 	                                       InSplineComponents, FBoxSphereBounds& Bounds, int32 TextureSize = 256, float Interval = 50);
+
+	// UFUNCTION(BlueprintCallable, Category = "ComputeShader")
+	static void CalDistanceToNearestSurface(FSceneView* SceneView, UTextureRenderTarget2D* InDebugView);
 };
 
